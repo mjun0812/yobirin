@@ -1,7 +1,7 @@
 ---
 title: "alerter代替の通知CLI yobirin の設計"
 created: "2026-07-26"
-updated: "2026-07-26"
+updated: "2026-07-27"
 model: "claude-fable-5"
 ---
 
@@ -50,12 +50,12 @@ macOSで「通知を出し、クリック/却下/タイムアウトを捕捉し�
 
 コード側の参照ポイント:
 
-| ファイル | 参照する理由 |
-| --- | --- |
-| `App/AppDelegate.swift` | AppDelegate方式のライフサイクル。**`asyncAfter(deadline: .now() + 0.5)` で遅延exit** している。本設計も遅延exitが必要と実測で確定しており (即exitするとアプリが再起動され余計な通知が出る)、0.5秒という値の裏付けになる |
-| `Notification/PermissionManager.swift` | 権限フロー。本設計では実測で挙動を確定させたので、実装の書き方の参考として読む |
-| `Notification/NotificationCategory.swift` | category設計 |
-| `Notification/UNNotificationService.swift` / `NSNotificationService.swift` | 新旧API両対応の抽象化 |
+| ファイル                                                                   | 参照する理由                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `App/AppDelegate.swift`                                                    | AppDelegate方式のライフサイクル。**`asyncAfter(deadline: .now() + 0.5)` で遅延exit** している。本設計も遅延exitが必要と実測で確定しており (即exitするとアプリが再起動され余計な通知が出る)、0.5秒という値の裏付けになる |
+| `Notification/PermissionManager.swift`                                     | 権限フロー。本設計では実測で挙動を確定させたので、実装の書き方の参考として読む                                                                                                                                          |
+| `Notification/NotificationCategory.swift`                                  | category設計                                                                                                                                                                                                            |
+| `Notification/UNNotificationService.swift` / `NSNotificationService.swift` | 新旧API両対応の抽象化                                                                                                                                                                                                   |
 
 **構成が異なる点**: swift-notifierは結果をCLI呼び出し元へ同期的に返す構成ではなく、Go側から起動してフォーカス制御する作り。yobirinは呼び出したプロセスのstdoutに結果を返すので、この部分は参考にしない (ただし追加検証によりIPCは不要と判明したため、独自設計が必要な箇所も残っていない)。
 
@@ -206,38 +206,38 @@ UN APIでは通知アイコンは送信アプリのバンドルアイコンに�
 
 Swiftのプロトタイプ (`main.swift` 約180行 + `.app` バンドル + ad-hoc署名) を組んで実機検証した。結果は上記の調査結論をすべて追認し、加えて**配布方式に関わる想定外の制約が2つ**見つかった。
 
-| 検証項目 | 結果 | 備考 |
-| --- | --- | --- |
-| `/private/tmp` 配置 (Mach-O直接実行 / `open` 起動とも) | ✕ | `UNErrorDomain Code=1 "Notifications are not allowed for this application"`。`mdls` で `kMDItemCFBundleIdentifier = null`、索引外でバンドルがアプリとして認識されない |
-| ホーム以下配置 + `open` (LaunchServices) 起動 | ○ | 通知配信成功 |
-| **ホーム以下配置 + バンドル内Mach-Oの直接実行** | **○** | 通知配信成功 (後日検証、下記「IPCは不要」参照)。**当初「不可」と誤って記録していた** |
-| バンドルアイコン (新Bundle IDで初回から埋め込み) | ○ | アイコンが正しく表示される |
-| バンドルアイコン (既存Bundle IDに後から追加) | ✕ | 真っ白のまま。通知ソース記述がキャッシュされ再生成されない |
-| `applicationIconImage` (候補B) | ✕ | 通知アイコンは不変。Dock専用という公式仕様どおり |
-| `NSWorkspace.setIcon` (候補) | ✕ | 戻り値は `true` だが通知アイコンは不変 |
-| 私用API `UNNotificationIcon` + `content.icon` — **6メソッド全て** (候補D) | ✕ | `iconAtPath:` / `iconForApplicationIdentifier:` (WebKitが使う手法) / `iconForApplicationURL:` / `iconForSystemImageNamed:` / `iconWithData:` / `iconNamed:` のすべてで、**クラス・メソッドは実在し、生成も `content.icon` への設定も配信も例外なく成功するが、表示は一切変わらない**。サーバ側 `allowPrivateProperties` ゲートの存在が実証された |
-| 私用 `shouldShowSubordinateIcon` | △ | 副アイコンの**表示枠は出る**が、中身は注入した画像ではなくアプリ自身のアイコン。私用画像は採用されない |
-| Communication Notifications (候補C) — entitlement付き | ✕✕ | **アプリが起動すらできない**。`open` が `Launchd job spawn failed` (POSIX 163) で失敗。2回再現し、entitlement除去で起動が復帰する対照実験も確認済み。ad-hoc署名で制限付きentitlementを主張した時点でOSが実行を拒否する |
-| Communication Notifications — entitlementなし | ✕ | `INInteraction.donate` と `content.updating(from: intent)` は**エラーなく成功**し配信も通るが、アバターは表示されずアイコンはアプリ自身のまま |
-| クリック検知 | ○ | `{"result":"clicked"}` |
-| **却下検知 (`customDismissAction`)** | **○** | `{"result":"dismissed"}`。**ポーリング不要で取得でき、yobirinの最大の技術的前提が実証された** |
-| 動的category登録 (呼び出しごとに構成変更) | ○ | `setNotificationCategories` の呼び直しで機能する |
-| delegate内での即exit | ✕ | 「アプリケーションは既に閉じられています」ダイアログが出る。**結果出力後1秒待ってexitする**ことで解消 |
+| 検証項目                                                                  | 結果  | 備考                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/private/tmp` 配置 (Mach-O直接実行 / `open` 起動とも)                    | ✕     | `UNErrorDomain Code=1 "Notifications are not allowed for this application"`。`mdls` で `kMDItemCFBundleIdentifier = null`、索引外でバンドルがアプリとして認識されない                                                                                                                                                                            |
+| ホーム以下配置 + `open` (LaunchServices) 起動                             | ○     | 通知配信成功                                                                                                                                                                                                                                                                                                                                     |
+| **ホーム以下配置 + バンドル内Mach-Oの直接実行**                           | **○** | 通知配信成功 (後日検証、下記「IPCは不要」参照)。**当初「不可」と誤って記録していた**                                                                                                                                                                                                                                                             |
+| バンドルアイコン (新Bundle IDで初回から埋め込み)                          | ○     | アイコンが正しく表示される                                                                                                                                                                                                                                                                                                                       |
+| バンドルアイコン (既存Bundle IDに後から追加)                              | ✕     | 真っ白のまま。通知ソース記述がキャッシュされ再生成されない                                                                                                                                                                                                                                                                                       |
+| `applicationIconImage` (候補B)                                            | ✕     | 通知アイコンは不変。Dock専用という公式仕様どおり                                                                                                                                                                                                                                                                                                 |
+| `NSWorkspace.setIcon` (候補)                                              | ✕     | 戻り値は `true` だが通知アイコンは不変                                                                                                                                                                                                                                                                                                           |
+| 私用API `UNNotificationIcon` + `content.icon` — **6メソッド全て** (候補D) | ✕     | `iconAtPath:` / `iconForApplicationIdentifier:` (WebKitが使う手法) / `iconForApplicationURL:` / `iconForSystemImageNamed:` / `iconWithData:` / `iconNamed:` のすべてで、**クラス・メソッドは実在し、生成も `content.icon` への設定も配信も例外なく成功するが、表示は一切変わらない**。サーバ側 `allowPrivateProperties` ゲートの存在が実証された |
+| 私用 `shouldShowSubordinateIcon`                                          | △     | 副アイコンの**表示枠は出る**が、中身は注入した画像ではなくアプリ自身のアイコン。私用画像は採用されない                                                                                                                                                                                                                                           |
+| Communication Notifications (候補C) — entitlement付き                     | ✕✕    | **アプリが起動すらできない**。`open` が `Launchd job spawn failed` (POSIX 163) で失敗。2回再現し、entitlement除去で起動が復帰する対照実験も確認済み。ad-hoc署名で制限付きentitlementを主張した時点でOSが実行を拒否する                                                                                                                           |
+| Communication Notifications — entitlementなし                             | ✕     | `INInteraction.donate` と `content.updating(from: intent)` は**エラーなく成功**し配信も通るが、アバターは表示されずアイコンはアプリ自身のまま                                                                                                                                                                                                    |
+| クリック検知                                                              | ○     | `{"result":"clicked"}`                                                                                                                                                                                                                                                                                                                           |
+| **却下検知 (`customDismissAction`)**                                      | **○** | `{"result":"dismissed"}`。**ポーリング不要で取得でき、yobirinの最大の技術的前提が実証された**                                                                                                                                                                                                                                                    |
+| 動的category登録 (呼び出しごとに構成変更)                                 | ○     | `setNotificationCategories` の呼び直しで機能する                                                                                                                                                                                                                                                                                                 |
+| delegate内での即exit                                                      | ✕     | 「アプリケーションは既に閉じられています」ダイアログが出る。**結果出力後1秒待ってexitする**ことで解消                                                                                                                                                                                                                                            |
 
 ### 旧API (NSUserNotification) との比較検証 (2026-07-26実測)
 
 「旧APIならアイコンを差し替えられるのだから、そちらを選ぶ価値はないか」を実機で検証した。結論は **alerterのアイコン差し替えは `com.apple.Terminal` へのなりすましによって成立している**。
 
-| 検証 | 結果 |
-| --- | --- |
-| 実物のalerter (`--app-icon`) | ○ 指定PNGが主アイコン位置に表示される (`_identityImage` + `_identityImageHasBorder`) |
-| alerterをad-hoc署名で再署名して実行 | ○ **変わらず動く**。署名は無関係 (Developer IDもHardened Runtimeも不要) |
-| alerterのBundle IDだけを別IDへバイナリパッチ | ○ **変わらず動く**。Bundle IDも無関係 |
-| 自作の`.app`バンドル + 旧API + `_identityImage` | ✕ バンドルアイコンが優先され差し替わらない (.icns / PNGとも) |
-| 自作の素のMach-O (Info.plist埋め込みなし) | ✕ 通知が表示されない |
-| 自作の素のMach-O + `__TEXT,__info_plist` 埋め込み (許可付与済み・固定パス・alerterと同じ起動順) | ✕ **表示されない** |
-| 自作の素のMach-O + **`NSBundle.bundleIdentifier` をswizzleして `com.apple.Terminal` を返す** | **○ 表示され、Finderアイコンに差し替わる** |
-| 新APIを素のMach-Oで使用 | ✕ `UNUserNotificationCenter.current()` が `bundleProxyForCurrentProcess is nil` で**例外を投げてクラッシュ**。実体としての`.app`バンドルを厳格に要求する |
+| 検証                                                                                            | 結果                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 実物のalerter (`--app-icon`)                                                                    | ○ 指定PNGが主アイコン位置に表示される (`_identityImage` + `_identityImageHasBorder`)                                                                     |
+| alerterをad-hoc署名で再署名して実行                                                             | ○ **変わらず動く**。署名は無関係 (Developer IDもHardened Runtimeも不要)                                                                                  |
+| alerterのBundle IDだけを別IDへバイナリパッチ                                                    | ○ **変わらず動く**。Bundle IDも無関係                                                                                                                    |
+| 自作の`.app`バンドル + 旧API + `_identityImage`                                                 | ✕ バンドルアイコンが優先され差し替わらない (.icns / PNGとも)                                                                                             |
+| 自作の素のMach-O (Info.plist埋め込みなし)                                                       | ✕ 通知が表示されない                                                                                                                                     |
+| 自作の素のMach-O + `__TEXT,__info_plist` 埋め込み (許可付与済み・固定パス・alerterと同じ起動順) | ✕ **表示されない**                                                                                                                                       |
+| 自作の素のMach-O + **`NSBundle.bundleIdentifier` をswizzleして `com.apple.Terminal` を返す**    | **○ 表示され、Finderアイコンに差し替わる**                                                                                                               |
+| 新APIを素のMach-Oで使用                                                                         | ✕ `UNUserNotificationCenter.current()` が `bundleProxyForCurrentProcess is nil` で**例外を投げてクラッシュ**。実体としての`.app`バンドルを厳格に要求する |
 
 **なぜalerterでは動くのか**: alerterは [`Sources/BundleHook/BundleIdentifierHook.m`](https://github.com/vjeantet/alerter/blob/master/Sources/BundleHook/BundleIdentifierHook.m) で `NSBundle.bundleIdentifier` をswizzleし、`-sender` 未指定時は **`com.apple.Terminal` を返す**。つまりalerterの通知はTerminal.appからの通知として配信されている。これが全観測を一貫して説明する:
 
@@ -253,10 +253,10 @@ Swiftのプロトタイプ (`main.swift` 約180行 + `.app` バンドル + ad-ho
 
 旧APIで効いたなりすましを新APIでも試したが、**両手法とも拒否された**。
 
-| 手法 | 結果 |
-| --- | --- |
-| `.app`バンドル + `NSBundle.bundleIdentifier` を `com.apple.Terminal` にswizzle | ✕ swizzle自体は成功 (`Bundle.main.bundleIdentifier` が `com.apple.Terminal` を返す状態) だが、`requestAuthorization` が `UNErrorDomain Code=1` で拒否 |
-| 私用 `-[UNUserNotificationCenter initWithBundleIdentifier:]` に `com.apple.Terminal` を渡す | ✕ 呼び出し・オブジェクト生成は成功するが、通知は `UNErrorDomain Code=1` で拒否 |
+| 手法                                                                                        | 結果                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.app`バンドル + `NSBundle.bundleIdentifier` を `com.apple.Terminal` にswizzle              | ✕ swizzle自体は成功 (`Bundle.main.bundleIdentifier` が `com.apple.Terminal` を返す状態) だが、`requestAuthorization` が `UNErrorDomain Code=1` で拒否 |
+| 私用 `-[UNUserNotificationCenter initWithBundleIdentifier:]` に `com.apple.Terminal` を渡す | ✕ 呼び出し・オブジェクト生成は成功するが、通知は `UNErrorDomain Code=1` で拒否                                                                        |
 
 **理由**: 新APIは身元を `NSBundle` ではなく **LaunchServicesのbundleProxy** から取得している (素のMach-Oで `bundleProxyForCurrentProcess is nil` の例外が出たことと整合)。プロセスの実体が身元の根拠なので、コード上の細工では変えられない。私用centerについては、調査ドキュメントの指摘通りサーバ側が「要求Bundle IDが呼出元自身のものか」を検証している。
 
@@ -266,16 +266,16 @@ Swiftのプロトタイプ (`main.swift` 約180行 + `.app` バンドル + ad-ho
 
 ### 旧API vs 新API 総括
 
-| 項目 | 旧API (bare binary) | 新API (`.app`バンドル) |
-| --- | --- | --- |
-| アイコンの通知ごと差し替え | ○ **ただし他社アプリへのなりすましが前提** | ✕ (全手段で不可) |
-| 必要な署名 | ad-hocで可 | ad-hocで可 |
-| 実行形態 | 素のMach-O + 埋め込みInfo.plist | `.app`バンドル必須 |
-| 起動方法 | 直接実行可 (配布が単一バイナリで済む) | `open`/LaunchServices経由が必須 (ラッパー + IPCが必要) |
-| 通知の名義 | **なりすまし先 (Terminal等) の名義**。システム設定でも独立して制御できない | 自分の名義。独立して制御できる |
-| 通知許可 | なりすまし先の許可に便乗 | 初回ダイアログで明示的に許可 |
-| 却下検知 | ポーリング必須。しかも**バナーを閉じただけでは検知できない** (通知センターから消えるまで待つ) | コールバックで即座に正確に検知 |
-| 将来性 | macOS 11でdeprecated。なりすましもいつ塞がれてもおかしくない | 現行API |
+| 項目                       | 旧API (bare binary)                                                                           | 新API (`.app`バンドル)                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| アイコンの通知ごと差し替え | ○ **ただし他社アプリへのなりすましが前提**                                                    | ✕ (全手段で不可)                                       |
+| 必要な署名                 | ad-hocで可                                                                                    | ad-hocで可                                             |
+| 実行形態                   | 素のMach-O + 埋め込みInfo.plist                                                               | `.app`バンドル必須                                     |
+| 起動方法                   | 直接実行可 (配布が単一バイナリで済む)                                                         | `open`/LaunchServices経由が必須 (ラッパー + IPCが必要) |
+| 通知の名義                 | **なりすまし先 (Terminal等) の名義**。システム設定でも独立して制御できない                    | 自分の名義。独立して制御できる                         |
+| 通知許可                   | なりすまし先の許可に便乗                                                                      | 初回ダイアログで明示的に許可                           |
+| 却下検知                   | ポーリング必須。しかも**バナーを閉じただけでは検知できない** (通知センターから消えるまで待つ) | コールバックで即座に正確に検知                         |
+| 将来性                     | macOS 11でdeprecated。なりすましもいつ塞がれてもおかしくない                                  | 現行API                                                |
 
 **決定**: yobirinは**新API + `.app`バンドル + ad-hoc署名 + バンドルアイコン焼き込み**で作り、**なりすましは採用しない**。理由:
 
@@ -290,14 +290,14 @@ Swiftのプロトタイプ (`main.swift` 約180行 + `.app` バンドル + ad-ho
 
 網羅性のため、調査ドキュメントの候補のうち実測しなかったものを明示する:
 
-| 手段 | 未検証の理由 |
-| --- | --- |
-| `UserNotificationsKit` の `_icons` | `allowable-clients` がApple製プロセスに限定。ad-hocアプリからは到達不能 |
-| 通知DB (`db2/db`) の直接編集 | Full Disk Access必須、DB破損・既存通知消失のリスク。実験の危険が利得を上回る |
-| Notification Service / Content Extension | 別バンドルの拡張が必要。ローカル通知では発火せず、macOSでは主アイコン非対応 |
-| Web Push / WidgetKit | ローカルCLIの構成から大きく外れる |
-| `responsibility_spawnattrs_setdisclaim` | アイコンではなく通知の帰属先を変える手段。LaunchServices起動で解決するため不要 |
-| 自前 `NSPanel` 通知 | Notification Centerを使わない別路線。アイコン回避策ではなく設計変更そのもの |
+| 手段                                     | 未検証の理由                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------------ |
+| `UserNotificationsKit` の `_icons`       | `allowable-clients` がApple製プロセスに限定。ad-hocアプリからは到達不能        |
+| 通知DB (`db2/db`) の直接編集             | Full Disk Access必須、DB破損・既存通知消失のリスク。実験の危険が利得を上回る   |
+| Notification Service / Content Extension | 別バンドルの拡張が必要。ローカル通知では発火せず、macOSでは主アイコン非対応    |
+| Web Push / WidgetKit                     | ローカルCLIの構成から大きく外れる                                              |
+| `responsibility_spawnattrs_setdisclaim`  | アイコンではなく通知の帰属先を変える手段。LaunchServices起動で解決するため不要 |
+| 自前 `NSPanel` 通知                      | Notification Centerを使わない別路線。アイコン回避策ではなく設計変更そのもの    |
 
 ### この検証で確定した設計変更
 
@@ -311,12 +311,12 @@ Swiftのプロトタイプ (`main.swift` 約180行 + `.app` バンドル + ad-ho
 
 M2aで「symlink方式は不可、`open`/LaunchServices起動 + IPCが必須」と結論したが、**これは誤りだった**。M2aの最初の実験で「配置場所 (`/private/tmp`)」と「実行方法 (Mach-O直接実行)」を同時に変えてしまい、失敗の原因を実行方法に誤って帰属させていた。切り分け直した結果:
 
-| 検証 | 結果 |
-| --- | --- |
-| ホーム以下のバンドル内のMach-Oを**直接実行** | **○ 通知が配信される** |
-| PATHに置いた**symlink経由**で実行 | **○ 動作する** (`Bundle.main` は正しく`.app`に解決される) |
-| 結果の同期取得 | **○ そのプロセスのstdoutにJSONがそのまま返る** |
-| **同一バンドルの複数インスタンス並行実行** | **○ クリックしたインスタンスにのみコールバックが届く**。他のインスタンスは影響を受けず待機を継続 |
+| 検証                                         | 結果                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| ホーム以下のバンドル内のMach-Oを**直接実行** | **○ 通知が配信される**                                                                           |
+| PATHに置いた**symlink経由**で実行            | **○ 動作する** (`Bundle.main` は正しく`.app`に解決される)                                        |
+| 結果の同期取得                               | **○ そのプロセスのstdoutにJSONがそのまま返る**                                                   |
+| **同一バンドルの複数インスタンス並行実行**   | **○ クリックしたインスタンスにのみコールバックが届く**。他のインスタンスは影響を受けず待機を継続 |
 
 真因は「バンドルを `/private/tmp` に置いていたこと」だけだった (Spotlight索引外でバンドルがアプリとして認識されない)。
 
@@ -336,13 +336,13 @@ M2aで「symlink方式は不可、`open`/LaunchServices起動 + IPCが必須」�
 
 #### 1. 通知が出せる条件 = Bundle IDの許可状態 (配置場所は初回のみ関係)
 
-| 段階 | 条件 | 結果 |
-| --- | --- | --- |
-| **許可済み**Bundle IDでの実行 | `~/Applications` / `/opt/homebrew/Cellar` / **`/private/tmp` すべて** | ○ 動く。**場所は無関係** |
-| 新規IDの初回 | `/private/tmp` + 直接実行 | ✕ `Code=1`。ダイアログも出ない |
-| 新規IDの初回 | `/private/tmp` + `lsregister -f` 後に直接実行 | ✕ 変わらず `Code=1` |
-| 新規IDの初回 | `/private/tmp` + **`open` 経由** | ✕ 変わらず `Code=1` |
-| 新規IDの初回 | **`~/Applications` + 直接実行** | **○ 許可ダイアログが出る。許可すれば以降通知が出る** |
+| 段階                          | 条件                                                                  | 結果                                                 |
+| ----------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
+| **許可済み**Bundle IDでの実行 | `~/Applications` / `/opt/homebrew/Cellar` / **`/private/tmp` すべて** | ○ 動く。**場所は無関係**                             |
+| 新規IDの初回                  | `/private/tmp` + 直接実行                                             | ✕ `Code=1`。ダイアログも出ない                       |
+| 新規IDの初回                  | `/private/tmp` + `lsregister -f` 後に直接実行                         | ✕ 変わらず `Code=1`                                  |
+| 新規IDの初回                  | `/private/tmp` + **`open` 経由**                                      | ✕ 変わらず `Code=1`                                  |
+| 新規IDの初回                  | **`~/Applications` + 直接実行**                                       | **○ 許可ダイアログが出る。許可すれば以降通知が出る** |
 
 `lsregister` も `open` も回避策にはならない。**バンドルを正規の場所 (`~/Applications` 等) に置くことだけが条件**であり、それさえ満たせばラッパー・IPC・`open`・ブートストラップ手順はすべて不要。
 
@@ -451,11 +451,12 @@ Homebrew formulaについては、**許可取得後なら `/opt/homebrew/Cellar/
 
 ## マイルストーン
 
-1. **M1 (止血・本設計とは独立)**: 現行hookに `-timeout 300` を追加するか、alerter #65ブランチを自前ビルド
+1. ~~**M1 (止血・本設計とは独立)**~~ **不要 (2026-07-27)**: M2bが先に完了したため止血は行わない
 2. ~~**M2a (検証スパイク)**~~ **完了 (2026-07-26)**: 「M2a 実機検証結果」を参照。アイコン戦略・却下検知・動的categoryのすべてに結論が出た
-3. **M2b (MVP)**: alerter同等のフル機能 (`--title/--subtitle/--message/--group/--timeout/--action/--reply/--sound/--image`) + JSON出力。ad-hoc署名でdotfilesから利用開始
-4. **M3**: hookの `alerter` 呼び出しを差し替え、実運用で放置テスト (メモリ・CPUの長期観測)
-5. **M4 (OSS化)**: リポジトリ分離、README (通知許可ダイアログの説明必須)、Homebrew tap
+3. ~~**M2b (MVP)**~~ **完了 (2026-07-27)**: kiro spec `yobirin-cli` (`.kiro/specs/yobirin-cli/`) として全14タスクを実装・検証済み (最終検証GO)。alerter同等のフル機能 + JSON出力 + アイコンプロファイル機構 (派生バンドル + symlink方式)。手動検証で孤児通知掃除のバグを発見・修正した (実装ノート参照)。アプリアイコン (神社の鈴 + 鈴緒 + 青海波) も適用済み
+4. **M4a (private公開)**: README (通知許可ダイアログの説明必須)・LICENSEを整備し、privateのGitHubリポジトリとしてpush。dotfilesからのインストールをGitHub経由 (clone + `scripts/install.sh`) にするため、M3より先行する (2026-07-27にM3と順序を入れ替え。リポジトリは当初から独立して作られているため「リポジトリ分離」は不要になった)
+5. **M3**: dotfilesのhookの `alerter` 呼び出しを差し替え、実運用で放置テスト (メモリ・CPUの長期観測)
+6. **M4b (public化)**: 実運用で安定を確認後にvisibilityをpublicへ変更。必要ならHomebrew tap (この段階でDeveloper ID署名 + notarizationを再検討)
 
 ## 未決事項 (詰めるポイント)
 
