@@ -120,12 +120,13 @@ $ rm -f ~/.local/bin/yobirin*
 ## Development
 
 ```console
+$ mise install            # install dev tools pinned in mise.toml (prek, shfmt, shellcheck, oxfmt)
+$ prek install            # enable pre-commit hooks (swift format / shfmt / shellcheck / oxfmt)
 $ swift test              # unit and integration tests (mocked notification center)
 $ bash scripts/build-app.sh [profile]   # build the signed .app bundle
-$ prek install            # enable pre-commit hooks (swift format / shfmt / shellcheck / oxfmt)
 ```
 
-CI (GitHub Actions) runs build, tests, and lint checks on every push to `main` and on pull requests.
+Dev tools are managed with [mise](https://mise.jdx.dev/). CI (GitHub Actions) runs build, tests, and lint checks (swift format / shellcheck / shfmt / oxfmt) on every push to `main` and on pull requests, installing the same tool versions via `mise.toml`.
 
 Notification display, interaction, and the permission flow are GUI-dependent and cannot be covered by automated tests; see `.kiro/specs/yobirin-cli/` for the spec and the manual verification checklist. Design rationale and the field measurements behind the architecture live in `docs/design-research.md` (Japanese).
 

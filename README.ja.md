@@ -128,12 +128,13 @@ $ rm -f ~/.local/bin/yobirin*
 ## 開発
 
 ```console
+$ mise install            # mise.tomlにpinした開発ツールの導入 (prek, shfmt, shellcheck, oxfmt)
+$ prek install            # pre-commit hookの有効化 (swift format / shfmt / shellcheck / oxfmt)
 $ swift test              # ユニットテストと結合テスト (通知センターはモック)
 $ bash scripts/build-app.sh [profile]   # 署名済み.appバンドルのビルド
-$ prek install            # pre-commit hookの有効化 (swift format / shfmt / shellcheck / oxfmt)
 ```
 
-CI (GitHub Actions) は `main` へのpushとpull requestで、ビルド、テスト、lintを実行する。
+開発ツールは [mise](https://mise.jdx.dev/) で管理する。CI (GitHub Actions) は `main` へのpushとpull requestで、ビルド、テスト、lint (swift format / shellcheck / shfmt / oxfmt) を実行し、ツールは `mise.toml` と同じバージョンを使う。
 
 通知の表示、対話、許可フローはGUIに依存するため自動テストでは検証できない。
 specと手動検証チェックリストは `.kiro/specs/yobirin-cli/` に、設計の経緯と実測記録は `docs/design-research.md` にある。
