@@ -81,25 +81,25 @@
   - _Requirements: 2.1, 3.8, 5.2, 6.1_
   - _Depends: 2.3_
 
-- [ ] 5.2 手動検証: 通知表示と応答検知
+- [x] 5.2 手動検証: 通知表示と応答検知
   - 通知の表示とバンドルアイコンの反映、クリック / 却下 / アクション / reply それぞれの検知を実機で確認する
   - 複数インスタンス並行実行で、操作したインスタンスにのみ応答が届くことを確認する
   - 各応答種別で期待どおりの結果JSONがstdoutへ返ることが記録されている
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.8, 4.1, 4.3_
 
-- [ ] 5.3 手動検証: 通知許可フロー
+- [x] 5.3 手動検証: 通知許可フロー
   - 初回の許可ダイアログが正規の場所への配置で表示されること、ダイアログ表示中はタイムアウトが進まないことを確認する
   - 許可拒否時にJSONなしでexit 2となりstderrに理由が出ることを確認する
   - 許可フローの各確認項目の結果が記録されている
   - _Requirements: 5.4, 7.1, 7.2_
 
-- [ ] 5.4 手動検証: ライフサイクルと再起動防御
+- [x] 5.4 手動検証: ライフサイクルと再起動防御
   - 引数なし起動が通知ゼロで即終了し、孤児通知が掃除されることを確認する
   - 結果出力後の遅延exitにより再起動由来の余計な通知が出ないこと、timeout後に通知が残らないことを確認する
   - ライフサイクル系の各確認項目の結果が記録されている
   - _Requirements: 5.1, 5.2, 5.5, 6.1, 6.2, 6.3_
 
-- [ ] 5.5 手動検証: アイコンプロファイルの独立性
+- [x] 5.5 手動検証: アイコンプロファイルの独立性
   - 各プロファイルで初回許可ダイアログが独立に表示され、それぞれのアイコン・名義で通知が配信されることを確認する
   - システム設定の通知一覧にプロファイルごとの項目が並び、片方だけオフにできることを確認する
   - プロファイル系の各確認項目の結果が記録されている
@@ -120,4 +120,6 @@
 - 4.1: 結線完了、timeout経路のe2e実証済み ({"result":"timeout"} + exit 0)。`~/Applications/Yobirin.app` 配置済み、scratchにsymlinkあり。通知許可は付与済み環境
 - 4.1: Yobirin.swiftの `NSApplication` 操作にmain actor警告3件 (Swift 6 isolation checking)。@MainActor付与はParsableCommand準拠と衝突しビルドが壊れるためFYIとして残置 (CLIエントリはmain thread実行で実行時リスクなし)。将来Swift toolchainがエラー化したら @preconcurrency 等で対処
 - 4.2: インストールは `scripts/install.sh` (常時ビルド→旧バンドル削除→~/Applications配置→`~/.local/bin/yobirin` symlink。`YOBIRIN_BIN_DIR` で変更可)。BIN_DIRに非symlink実ファイルがあると非破壊で中断する。`.build/app/` のLaunchServices登録リスクは未対処 (既知)
-- 4.3: プロファイル選択は「プロファイルごとのsymlink」方式に確定 (design.md更新済み)。`install.sh claude codex` で Yobirin-Claude.app / Yobirin-Codex.app + `yobirin-claude` / `yobirin-codex` symlinkを配置。プレースホルダアイコンのみ (実ロゴ未使用)。**新Bundle IDの通知配信は未実施** — 5.5の手動検証で初回許可ダイアログごと確認する
+- 4.3: プロファイル選択は「プロファイルごとのsymlink」方式に確定 (design.md更新済み)。`install.sh claude codex` で Yobirin-Claude.app / Yobirin-Codex.app + `yobirin-claude` / `yobirin-codex` symlinkを配置。プレースホルダアイコンのみ (実ロゴ未使用)
+- 5.4: **手動検証でバグ発見→修正 (commit 28fb36a)**: cleanUpAndExitが非同期掃除の完了を待たずreturnし、completion実行前にプロセスがexitして孤児掃除が機能していなかった。教訓: 「completionを待つ構造のモックテスト」は「実プロセスが待たずに死ぬ」バグを検出できない。exit系の非同期APIは「呼び出しがreturnする前に完了しているか」をテストすること
+- 5.2〜5.5: 手動検証全18項目pass (2026-07-27、記録は manual-verification.md)
