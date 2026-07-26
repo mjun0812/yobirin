@@ -47,7 +47,7 @@
   - 許可なし環境での実行がexit 2 + stderrになり、認可後にのみタイマーが動くことを確認できる
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 7.1, 7.2, 7.3_
 
-- [ ] 3.2 終了処理とアプリ再起動への防御を実装する
+- [x] 3.2 終了処理とアプリ再起動への防御を実装する
   - 結果出力後に0.5〜1秒の遅延を置いて終了する
   - 引数なし起動時は通知を出さず、応答待ちの主がいない配信済み通知を掃除して即終了する
   - 応答の受け付けをプロセス生存中に限定する
@@ -115,3 +115,5 @@
 - 2.3: **4.1の配線時の注意**: `NotificationSession` のコンストラクタ引数 `actions` は `request.actions` と同一の配列を渡すこと (categoryビルドと応答→label復元が別経路のため、不一致だとaction結果が壊れる)。`getDeliveredNotifications` はプロトコルに先行宣言済み (3.2の孤児掃除用)
 - 3.1: オーケストレーションは `AppFlow` (認可→配信→タイマー→出力決定)。タイマーはScheduler注入で抽象化。timeout時の通知削除は `NotificationSession.commit` の一度きり機構内で実施。認可optionsは `[.alert, .sound]`
 - 3.1: レビュー提案: AppFlowレベルで「deliver throw→環境エラー出力」の結合テストを5.1で1本追加すると堅牢 (現状は各部品の単体テストでカバー)
+- 3.2: 遅延exitは `ExitCoordinator` (delay=1.0秒定数)、引数なしガードは `LaunchGuard.isArgumentlessLaunch` + `cleanUpAndExit` (掃除完了後にexit 0、遅延なし)。4.1はこの2部品を結線する
+- 3.2: `UNNotification` はSDK上init不可でテストfixtureを作れない。孤児掃除の複数通知ケースは手動検証5.4で確認する。レビュー提案: LaunchGuardTestsのMockNotificationCenterClientにロックまたは安全性コメントを追加 (非ブロッキング)
