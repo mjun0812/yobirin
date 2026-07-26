@@ -1,5 +1,7 @@
 import XCTest
 import UserNotifications
+import CoreGraphics
+import ImageIO
 
 @testable import yobirin
 
@@ -61,6 +63,50 @@ final class NotificationSessionTests: XCTestCase {
             sound: sound,
             image: image
         )
+    }
+
+    private struct PNGFixtureError: Error {}
+
+    /// テスト用の有効なPNGファイルを使い捨ての一時ディレクトリに生成する。
+    /// `UNNotificationAttachment` は初期化時にソースファイルを移動させるため
+    /// (Requirement 1.4のテストが `assets/icon/*.png` のようなリポジトリ資産を
+    /// 消費しないよう)、ここで毎回新規のfixtureを作る。
+    private static func makeTemporaryPNGFile() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let width = 4
+        let height = 4
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            throw PNGFixtureError()
+        }
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        guard let image = context.makeImage() else {
+            throw PNGFixtureError()
+        }
+
+        let url = directory.appendingPathComponent("fixture.png")
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+            throw PNGFixtureError()
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw PNGFixtureError()
+        }
+        return url
     }
 
     // MARK: - Category registration (design.md NotificationSession / Requirements 4.1, 4.2, 4.3, 4.4)
@@ -154,6 +200,24 @@ final class NotificationSessionTests: XCTestCase {
         XCTAssertThrowsError(try session.deliver(request))
     }
 
+    func testDeliverWithValidImageAttachesOneAttachmentToContent() throws {
+        let client = MockNotificationCenterClient()
+        let session = NotificationSession(client: client, actions: [], onResult: { _ in })
+        let pngURL = try Self.makeTemporaryPNGFile()
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: pngURL.deletingLastPathComponent())
+        }
+        let request = makeRequest(image: pngURL.path)
+
+        try session.deliver(request)
+
+        let content = try XCTUnwrap(client.addedRequests.first?.content)
+        XCTAssertEqual(content.attachments.count, 1)
+        let attachment = try XCTUnwrap(content.attachments.first)
+        XCTAssertFalse(attachment.identifier.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: attachment.url.path))
+    }
+
     // MARK: - Response classification (Requirements 3.1, 3.2, 3.3, 3.4)
 
     func testHandleResponseDefaultActionEmitsClicked() {
@@ -181,6 +245,15 @@ final class NotificationSessionTests: XCTestCase {
         session.handleResponse(actionIdentifier: "yobirin-action-1", userText: nil)
 
         XCTAssertEqual(results, [.action(label: "Dismiss", index: 1)])
+    }
+
+    func testHandleResponseWithDuplicateLabelsIdentifiesByIndexNotLabel() {
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: MockNotificationCenterClient(), actions: ["Open", "Open"], onResult: { results.append($0) })
+
+        session.handleResponse(actionIdentifier: "yobirin-action-1", userText: nil)
+
+        XCTAssertEqual(results, [.action(label: "Open", index: 1)])
     }
 
     func testHandleResponseReplyIdentifierEmitsRepliedWithText() {
