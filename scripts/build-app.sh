@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Builds a signed Yobirin.app bundle without an Xcode project.
+# Builds a signed Yobirin.app bundle without an Xcode project. An optional
+# profile argument (e.g. "claude") builds a derived bundle with a different
+# icon and Bundle ID instead of the default (e.g. Yobirin-Claude.app /
+# com.mjun0812.yobirin.claude).
 #
 # Steps: build arm64 + x86_64 individually -> lipo into a universal binary
 # -> assemble Contents/{MacOS,Resources} + Info.plist -> generate AppIcon.icns
@@ -9,15 +12,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-APP_NAME="Yobirin"
-BUNDLE_ID="com.mjun0812.yobirin"
+PROFILE="${1:-}"
+if [[ -n "${PROFILE}" && ! "${PROFILE}" =~ ^[a-z0-9]+$ ]]; then
+	echo "error: invalid profile name: ${PROFILE} (expected lowercase alphanumeric)" >&2
+	exit 1
+fi
+
+if [[ -z "${PROFILE}" ]]; then
+	APP_NAME="Yobirin"
+	BUNDLE_ID="com.mjun0812.yobirin"
+	ICON_SOURCE="${REPO_ROOT}/assets/icon/AppIcon.png"
+else
+	PROFILE_FIRST_CHAR="$(printf '%s' "${PROFILE}" | cut -c1 | tr '[:lower:]' '[:upper:]')"
+	PROFILE_REST="$(printf '%s' "${PROFILE}" | cut -c2-)"
+	APP_NAME="Yobirin-${PROFILE_FIRST_CHAR}${PROFILE_REST}"
+	BUNDLE_ID="com.mjun0812.yobirin.${PROFILE}"
+	ICON_SOURCE="${REPO_ROOT}/assets/icon/${PROFILE}.png"
+fi
+
 EXECUTABLE_NAME="yobirin"
 CONFIGURATION="release"
 
 BUILD_DIR="${REPO_ROOT}/.build"
 APP_DIR="${BUILD_DIR}/app/${APP_NAME}.app"
-ICONSET_DIR="${BUILD_DIR}/app/AppIcon.iconset"
-ICON_SOURCE="${REPO_ROOT}/assets/icon/AppIcon.png"
+ICONSET_DIR="${BUILD_DIR}/app/${APP_NAME}-AppIcon.iconset"
 
 echo "==> Building arm64 binary"
 swift build --package-path "${REPO_ROOT}" -c "${CONFIGURATION}" --arch arm64

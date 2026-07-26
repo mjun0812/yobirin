@@ -67,7 +67,7 @@
   - インストール後にPATH上のコマンドで通知が出せ、再インストールで旧バンドルが残らない
   - _Requirements: 8.3, 8.4, 8.5_
 
-- [ ] 4.3 アイコンプロファイルの派生バンドルを実装する
+- [x] 4.3 アイコンプロファイルの派生バンドルを実装する
   - アイコンとBundle IDのみ差し替えた派生バンドルをビルドできるようにする
   - プロファイル選択機構 (プロファイルごとのsymlink、または--profileによる薄いディスパッチ) を確定して実装する
   - 2つのプロファイルが並存し、それぞれのアイコンと名義で通知が配信される
@@ -120,3 +120,4 @@
 - 4.1: 結線完了、timeout経路のe2e実証済み ({"result":"timeout"} + exit 0)。`~/Applications/Yobirin.app` 配置済み、scratchにsymlinkあり。通知許可は付与済み環境
 - 4.1: Yobirin.swiftの `NSApplication` 操作にmain actor警告3件 (Swift 6 isolation checking)。@MainActor付与はParsableCommand準拠と衝突しビルドが壊れるためFYIとして残置 (CLIエントリはmain thread実行で実行時リスクなし)。将来Swift toolchainがエラー化したら @preconcurrency 等で対処
 - 4.2: インストールは `scripts/install.sh` (常時ビルド→旧バンドル削除→~/Applications配置→`~/.local/bin/yobirin` symlink。`YOBIRIN_BIN_DIR` で変更可)。BIN_DIRに非symlink実ファイルがあると非破壊で中断する。`.build/app/` のLaunchServices登録リスクは未対処 (既知)
+- 4.3: プロファイル選択は「プロファイルごとのsymlink」方式に確定 (design.md更新済み)。`install.sh claude codex` で Yobirin-Claude.app / Yobirin-Codex.app + `yobirin-claude` / `yobirin-codex` symlinkを配置。プレースホルダアイコンのみ (実ロゴ未使用)。**新Bundle IDの通知配信は未実施** — 5.5の手動検証で初回許可ダイアログごと確認する
