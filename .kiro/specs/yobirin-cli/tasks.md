@@ -61,7 +61,7 @@
   - ~/Applications配置のバンドルをsymlink経由で直接実行し、timeout経路で結果JSONがstdoutへ返りexit 0となる
   - _Requirements: 3.6, 8.3_
 
-- [ ] 4.2 インストールとアップグレードの処理を実装する
+- [x] 4.2 インストールとアップグレードの処理を実装する
   - バンドルの~/Applicationsへの配置とPATHへのsymlink作成
   - アップグレード時に同一Bundle IDの旧バンドルを確実に削除する
   - インストール後にPATH上のコマンドで通知が出せ、再インストールで旧バンドルが残らない
@@ -119,3 +119,4 @@
 - 3.2: `UNNotification` はSDK上init不可でテストfixtureを作れない。孤児掃除の複数通知ケースは手動検証5.4で確認する。レビュー提案: LaunchGuardTestsのMockNotificationCenterClientにロックまたは安全性コメントを追加 (非ブロッキング)
 - 4.1: 結線完了、timeout経路のe2e実証済み ({"result":"timeout"} + exit 0)。`~/Applications/Yobirin.app` 配置済み、scratchにsymlinkあり。通知許可は付与済み環境
 - 4.1: Yobirin.swiftの `NSApplication` 操作にmain actor警告3件 (Swift 6 isolation checking)。@MainActor付与はParsableCommand準拠と衝突しビルドが壊れるためFYIとして残置 (CLIエントリはmain thread実行で実行時リスクなし)。将来Swift toolchainがエラー化したら @preconcurrency 等で対処
+- 4.2: インストールは `scripts/install.sh` (常時ビルド→旧バンドル削除→~/Applications配置→`~/.local/bin/yobirin` symlink。`YOBIRIN_BIN_DIR` で変更可)。BIN_DIRに非symlink実ファイルがあると非破壊で中断する。`.build/app/` のLaunchServices登録リスクは未対処 (既知)
