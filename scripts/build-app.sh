@@ -7,6 +7,11 @@
 # Steps: build arm64 + x86_64 individually -> lipo into a universal binary
 # -> assemble Contents/{MacOS,Resources} + Info.plist -> generate AppIcon.icns
 # via sips + iconutil -> ad-hoc codesign -> LaunchServices smoke test.
+#
+# Environment variables:
+#   YOBIRIN_PREBUILT_BINARY  Use this universal binary instead of compiling
+#                            (skips both swift build passes and lipo).
+#   YOBIRIN_VERSION          CFBundleShortVersionString (default: 0.1.0).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,20 +42,34 @@ BUILD_DIR="${REPO_ROOT}/.build"
 APP_DIR="${BUILD_DIR}/app/${APP_NAME}.app"
 ICONSET_DIR="${BUILD_DIR}/app/${APP_NAME}-AppIcon.iconset"
 
-echo "==> Building arm64 binary"
-swift build --package-path "${REPO_ROOT}" -c "${CONFIGURATION}" --arch arm64
+PREBUILT_BINARY="${YOBIRIN_PREBUILT_BINARY:-}"
+if [[ -n "${PREBUILT_BINARY}" && ! -f "${PREBUILT_BINARY}" ]]; then
+	echo "error: YOBIRIN_PREBUILT_BINARY not found: ${PREBUILT_BINARY}" >&2
+	exit 1
+fi
 
-echo "==> Building x86_64 binary"
-swift build --package-path "${REPO_ROOT}" -c "${CONFIGURATION}" --arch x86_64
+if [[ -z "${PREBUILT_BINARY}" ]]; then
+	echo "==> Building arm64 binary"
+	swift build --package-path "${REPO_ROOT}" -c "${CONFIGURATION}" --arch arm64
+
+	echo "==> Building x86_64 binary"
+	swift build --package-path "${REPO_ROOT}" -c "${CONFIGURATION}" --arch x86_64
+fi
 
 echo "==> Assembling ${APP_NAME}.app"
 rm -rf "${APP_DIR}"
 mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
 
-lipo -create \
-	"${BUILD_DIR}/arm64-apple-macosx/${CONFIGURATION}/${EXECUTABLE_NAME}" \
-	"${BUILD_DIR}/x86_64-apple-macosx/${CONFIGURATION}/${EXECUTABLE_NAME}" \
-	-output "${APP_DIR}/Contents/MacOS/${EXECUTABLE_NAME}"
+if [[ -n "${PREBUILT_BINARY}" ]]; then
+	echo "==> Using prebuilt binary: ${PREBUILT_BINARY}"
+	cp "${PREBUILT_BINARY}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE_NAME}"
+	chmod +x "${APP_DIR}/Contents/MacOS/${EXECUTABLE_NAME}"
+else
+	lipo -create \
+		"${BUILD_DIR}/arm64-apple-macosx/${CONFIGURATION}/${EXECUTABLE_NAME}" \
+		"${BUILD_DIR}/x86_64-apple-macosx/${CONFIGURATION}/${EXECUTABLE_NAME}" \
+		-output "${APP_DIR}/Contents/MacOS/${EXECUTABLE_NAME}"
+fi
 
 cat >"${APP_DIR}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -66,7 +85,7 @@ cat >"${APP_DIR}/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${YOBIRIN_VERSION:-0.1.0}</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleIconFile</key>

@@ -35,6 +35,14 @@ $ bash scripts/install.sh
 
 インストーラはユニバーサルバイナリをビルドし、ad-hoc署名した `Yobirin.app` を `~/Applications` へ配置して、コマンドを `~/.local/bin/yobirin` へsymlinkする (`~/.local/bin` をPATHに通すか、`YOBIRIN_BIN_DIR` で配置先を変更する)。
 
+ビルドを省きたい場合は、リリースのビルド済みユニバーサルバイナリを取得できる (privateリポジトリの間は [gh CLI](https://cli.github.com/) が必要):
+
+```console
+$ YOBIRIN_FROM_RELEASE=1 bash scripts/install.sh
+```
+
+リリースから取得するのはMach-Oバイナリだけで、バンドル組み立て・アイコン焼き込み・ad-hoc署名はローカルで行う。そのためカスタムアイコンやプロファイルはそのまま使える。`YOBIRIN_RELEASE_TAG=v0.1.0` で特定のリリースに固定できる。
+
 再実行すればそのままアップグレードになる。
 旧バンドルを削除してから新バンドルを配置するため、macOSに登録されるコピーは常に1つに保たれる。
 

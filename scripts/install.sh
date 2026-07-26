@@ -12,6 +12,13 @@
 # installed bundle (if any) -> copy the fresh bundle into ~/Applications ->
 # (re)create a symlink from BIN_DIR to the bundle's Mach-O -> verify the
 # symlink runs.
+#
+# Environment variables:
+#   YOBIRIN_FROM_RELEASE  When set to 1, download the prebuilt universal binary
+#                         from a GitHub release instead of compiling locally.
+#                         Requires the gh CLI (the repository is private).
+#   YOBIRIN_RELEASE_TAG   Release tag to download (default: latest).
+#   YOBIRIN_BIN_DIR       Where to place the command symlink (default: ~/.local/bin).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +42,28 @@ fi
 PROFILES=("$@")
 if [[ ${#PROFILES[@]} -eq 0 ]]; then
 	PROFILES=("")
+fi
+
+# リリースから取得する場合は、全プロファイルで同じバイナリを使い回す。
+DOWNLOAD_DIR=""
+if [[ "${YOBIRIN_FROM_RELEASE:-}" == "1" ]]; then
+	if ! command -v gh >/dev/null 2>&1; then
+		echo "error: YOBIRIN_FROM_RELEASE=1 requires the gh CLI" >&2
+		exit 1
+	fi
+
+	DOWNLOAD_DIR="$(mktemp -d)"
+	trap 'rm -rf "${DOWNLOAD_DIR}"' EXIT
+
+	echo "==> Downloading prebuilt binary from release (${YOBIRIN_RELEASE_TAG:-latest})"
+	gh release download ${YOBIRIN_RELEASE_TAG:+"${YOBIRIN_RELEASE_TAG}"} \
+		--repo mjun0812/yobirin \
+		--pattern "${EXECUTABLE_NAME}-universal" \
+		--dir "${DOWNLOAD_DIR}"
+
+	export YOBIRIN_PREBUILT_BINARY="${DOWNLOAD_DIR}/${EXECUTABLE_NAME}-universal"
+	chmod +x "${YOBIRIN_PREBUILT_BINARY}"
+	lipo -info "${YOBIRIN_PREBUILT_BINARY}"
 fi
 
 for PROFILE in "${PROFILES[@]}"; do

@@ -32,6 +32,14 @@ $ bash scripts/install.sh
 
 The installer builds a universal binary, assembles an ad-hoc signed `Yobirin.app`, places it into `~/Applications`, and symlinks the command into `~/.local/bin/yobirin` (make sure `~/.local/bin` is on your `PATH`, or set `YOBIRIN_BIN_DIR` to another directory).
 
+To skip compilation, download the prebuilt universal binary from a release instead (requires the [gh CLI](https://cli.github.com/) while the repository is private):
+
+```console
+$ YOBIRIN_FROM_RELEASE=1 bash scripts/install.sh
+```
+
+Only the Mach-O binary comes from the release; the bundle, icon, and ad-hoc signature are still produced locally, so custom icons and profiles keep working. Set `YOBIRIN_RELEASE_TAG=v0.1.0` to pin a specific release.
+
 Re-running the installer upgrades in place. The old bundle is removed before the new one is installed, so only one copy is ever registered with macOS.
 
 ## Notification permission

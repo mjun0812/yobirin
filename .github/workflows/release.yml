@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build universal binary & publish release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Show Swift version
+        run: swift --version
+      - name: Test
+        run: swift test
+      - name: Build universal binary
+        run: |
+          swift build -c release --arch arm64
+          swift build -c release --arch x86_64
+          lipo -create \
+            .build/arm64-apple-macosx/release/yobirin \
+            .build/x86_64-apple-macosx/release/yobirin \
+            -output yobirin-universal
+          lipo -info yobirin-universal
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes yobirin-universal
