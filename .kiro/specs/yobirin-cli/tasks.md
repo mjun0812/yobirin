@@ -7,7 +7,7 @@
   - `swift build` と `swift test` が成功する
   - _Requirements: 9.1_
 
-- [ ] 1.2 署名済み.appバンドルを組み立てるビルドスクリプトを作成する
+- [x] 1.2 署名済み.appバンドルを組み立てるビルドスクリプトを作成する
   - 2アーキテクチャの個別ビルドとlipoによるユニバーサル化
   - Contents/{MacOS,Resources}の組み立てとInfo.plist (Bundle ID、LSUIElement=true) の配置
   - プレースホルダのアイコン元画像 (単色PNG等) をこのタスク内で生成して配置し、sips + iconutilでicnsを生成しバンドルへ焼き込む
@@ -104,3 +104,8 @@
   - システム設定の通知一覧にプロファイルごとの項目が並び、片方だけオフにできることを確認する
   - プロファイル系の各確認項目の結果が記録されている
   - _Requirements: 10.2, 10.3_
+
+## Implementation Notes
+
+- 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい
+- 1.2: ビルド成果物は `.build/app/Yobirin.app`。スモークテストは entitlement起因の起動不能 (Launchd job spawn failed) をexit非0で検出できることを破壊テストで確認済み

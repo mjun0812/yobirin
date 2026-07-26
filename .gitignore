@@ -8,3 +8,7 @@
 
 # 生成アイコン
 *.iconset/
+
+# グローバルgitignoreの "Icon" パターン (Icon\r用) がcase-insensitive FSで
+# assets/icon/ ディレクトリにマッチしてしまうのを打ち消す
+!assets/icon/
