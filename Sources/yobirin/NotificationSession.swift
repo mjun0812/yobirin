@@ -35,6 +35,11 @@ final class NotificationSession {
     /// true == 既に結果が確定済み。以降の入力は無視する (Requirement 3.8)。
     private let committedLock = OSAllocatedUnfairLock(initialState: false)
 
+    /// `deliver` で配信した通知のidentifier。timeout確定時に削除する対象を特定するために保持する
+    /// (Requirement 5.2)。`deliver` は応答処理が始まる前に一度だけ呼ばれる想定のため、
+    /// 追加のロックなしで安全に読み書きできる。
+    private var deliveredIdentifier: String?
+
     init(client: NotificationCenterClient, actions: [String], onResult: @escaping (NotificationResult) -> Void) {
         self.client = client
         self.actions = actions
@@ -60,6 +65,7 @@ final class NotificationSession {
         ])
 
         let notificationRequest = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        deliveredIdentifier = identifier
         client.add(notificationRequest, completionHandler: completionHandler)
     }
 
@@ -96,6 +102,10 @@ final class NotificationSession {
     }
 
     /// 一度きりの結果確定 (Requirement 3.8)。先着1件のみが `onResult` を呼び、以降は無視される。
+    ///
+    /// `result` がtimeoutの場合のみ、配信済み通知を削除してから `onResult` を呼ぶ
+    /// (Requirement 5.2: exit後にクリックされ得る通知を残さない)。応答確定時 (clicked等) は
+    /// 通知を削除せずそのまま出力を決定する (design.md System Flows)。
     private func commit(_ result: NotificationResult) {
         let shouldEmit = committedLock.withLock { alreadyCommitted -> Bool in
             if alreadyCommitted { return false }
@@ -103,6 +113,9 @@ final class NotificationSession {
             return true
         }
         guard shouldEmit else { return }
+        if case .timeout = result, let identifier = deliveredIdentifier {
+            client.removeDeliveredNotifications(withIdentifiers: [identifier])
+        }
         onResult(result)
     }
 

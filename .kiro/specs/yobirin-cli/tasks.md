@@ -40,7 +40,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 3.5, 3.7, 3.8, 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 3. Core: アプリライフサイクルと権限フロー
-- [ ] 3.1 認可フローとタイムアウト制御を実装する
+- [x] 3.1 認可フローとタイムアウト制御を実装する
   - NSApplication + AppDelegate方式で起動し、認可完了後に通知配信とタイムアウトタイマーを開始する
   - 許可なし (エラー / granted == false の両経路) はstderrへ理由を出してexit 2で終了する
   - タイムアウト確定時は配信済み通知を削除してから結果を出力する。--timeout省略時は無期限に待機する
@@ -113,3 +113,5 @@
 - 2.1: 負値オプションのテストは `--timeout=-1` の `=` 構文が必要 (スペース区切りだとArgumentParser自体が弾き、自前バリデーション経路を検証できない)
 - 2.3: 通知センターは `NotificationCenterClient` プロトコルで抽象化 (実アダプタ: `UNNotificationCenterAdapter`)。応答判別はUN型を含まない `handleResponse(actionIdentifier:userText:)` で受ける。replyのidentifierは `yobirin-reply`
 - 2.3: **4.1の配線時の注意**: `NotificationSession` のコンストラクタ引数 `actions` は `request.actions` と同一の配列を渡すこと (categoryビルドと応答→label復元が別経路のため、不一致だとaction結果が壊れる)。`getDeliveredNotifications` はプロトコルに先行宣言済み (3.2の孤児掃除用)
+- 3.1: オーケストレーションは `AppFlow` (認可→配信→タイマー→出力決定)。タイマーはScheduler注入で抽象化。timeout時の通知削除は `NotificationSession.commit` の一度きり機構内で実施。認可optionsは `[.alert, .sound]`
+- 3.1: レビュー提案: AppFlowレベルで「deliver throw→環境エラー出力」の結合テストを5.1で1本追加すると堅牢 (現状は各部品の単体テストでカバー)

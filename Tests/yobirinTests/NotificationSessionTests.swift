@@ -12,6 +12,10 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     private(set) var addedRequests: [UNNotificationRequest] = []
     private(set) var callOrder: [String] = []
 
+    func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
+        completionHandler(true, nil)
+    }
+
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>) {
         setCategoriesCalls.append(categories)
         callOrder.append("setNotificationCategories")
@@ -245,6 +249,45 @@ final class NotificationSessionTests: XCTestCase {
         session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
 
         XCTAssertEqual(results, [.timeout])
+    }
+
+    // MARK: - Timeout removes delivered notification before output decision (Requirement 5.2)
+
+    func testHandleTimeoutRemovesDeliveredNotificationBeforeEmittingResult() throws {
+        let client = MockNotificationCenterClient()
+        var removalCountAtEmitTime = -1
+        var results: [NotificationResult] = []
+        let session = NotificationSession(
+            client: client,
+            actions: [],
+            onResult: { result in
+                removalCountAtEmitTime = client.removeDeliveredCalls.count
+                results.append(result)
+            }
+        )
+        let request = makeRequest()
+        try session.deliver(request)
+        let deliveredIdentifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+
+        session.handleTimeout()
+
+        // 削除が先に完了してからemitされること (design.md System Flows のタイムアウト分岐)
+        XCTAssertEqual(removalCountAtEmitTime, 1)
+        XCTAssertEqual(client.removeDeliveredCalls, [[deliveredIdentifier]])
+        XCTAssertEqual(results, [.timeout])
+    }
+
+    func testHandleResponseClickedDoesNotRemoveDeliveredNotification() throws {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+        let request = makeRequest()
+        try session.deliver(request)
+
+        session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
+
+        XCTAssertTrue(client.removeDeliveredCalls.isEmpty)
+        XCTAssertEqual(results, [.clicked])
     }
 
     func testConcurrentResponsesCommitExactlyOnce() {

@@ -7,6 +7,7 @@ import UserNotifications
 /// `NotificationSession` はこのプロトコルを介して通知センターを操作し、
 /// テストはモック実装に対して行う (design.md NotificationSession)。
 protocol NotificationCenterClient {
+    func requestAuthorization(completionHandler: @escaping @Sendable (Bool, Error?) -> Void)
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>)
     func removeDeliveredNotifications(withIdentifiers identifiers: [String])
     func add(_ request: UNNotificationRequest, completionHandler: (@Sendable (Error?) -> Void)?)
@@ -17,6 +18,10 @@ protocol NotificationCenterClient {
 /// swift testでは使えず、実配線とスモーク確認は task 3.1/4.1 の範囲とする。
 final class UNNotificationCenterAdapter: NotificationCenterClient {
     private let center = UNUserNotificationCenter.current()
+
+    func requestAuthorization(completionHandler: @escaping @Sendable (Bool, Error?) -> Void) {
+        center.requestAuthorization(options: [.alert, .sound], completionHandler: completionHandler)
+    }
 
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>) {
         center.setNotificationCategories(categories)
