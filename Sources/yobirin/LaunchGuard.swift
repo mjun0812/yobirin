@@ -1,3 +1,4 @@
+import Dispatch
 import UserNotifications
 
 /// 引数なし起動への防御 (design.md AppLifecycle / Error Handling > 再起動・孤児通知への防御、
@@ -20,9 +21,27 @@ enum LaunchGuard {
     ///
     /// 掃除完了後にexitすること(fire-and-forgetでexitすると掃除が走る前にプロセスが死ぬ)を
     /// 保証するため、`removeDeliveredNotifications` の呼び出しと `exit` は
-    /// `getDeliveredNotifications` の completionHandler 内で順に行う。
-    static func cleanUpAndExit(client: NotificationCenterClient, exit: @escaping @Sendable (Int32) -> Void) {
-        DeliveredNotificationSweep(client: client, exit: exit).run()
+    /// `getDeliveredNotifications` の completionHandler 内で順に行う。呼び出し元
+    /// (`YobirinMain.main()`)は本関数がreturnした直後にプロセスをexitさせうるため、
+    /// この非同期completionが完了するまで本関数自体を同期的にブロックする。
+    ///
+    /// 実プロセスではcompletion内の実 `exit(0)` がプロセスを終了させるため、以降の
+    /// `finished.signal()` には到達しない (それで正しい)。`timeout` はUN側の稀なハング
+    /// への保険であり、Requirement 6.2の「即終了」を損なわない値 (デフォルト2秒)。
+    static func cleanUpAndExit(
+        client: NotificationCenterClient,
+        timeout: DispatchTimeInterval = .seconds(2),
+        exit: @escaping @Sendable (Int32) -> Void
+    ) {
+        let finished = DispatchSemaphore(value: 0)
+        DeliveredNotificationSweep(
+            client: client,
+            exit: { code in
+                exit(code)
+                finished.signal()
+            }
+        ).run()
+        _ = finished.wait(timeout: .now() + timeout)
     }
 }
 

@@ -44,6 +44,23 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
     }
 }
 
+/// `getDeliveredNotifications` の completionHandler を一切呼び出さないモック。
+/// UN側が稀にハングするケース (Apple Forums 746045) を模し、`cleanUpAndExit` の
+/// `timeout` が上限として機能することを検証するために使う。
+private final class NeverCompletingNotificationCenterClient: NotificationCenterClient, @unchecked Sendable {
+    func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {}
+
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>) {}
+
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String]) {}
+
+    func add(_ request: UNNotificationRequest, completionHandler: ((Error?) -> Void)?) {}
+
+    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
+        // 意図的にcompletionHandlerを呼ばない (ハングを再現)。
+    }
+}
+
 /// `cleanUpAndExit` の `exit` は `@Sendable` が要求されるため、背景スレッドから記録する
 /// テスト結果はロックで保護したこのボックス経由で読み書きする
 /// (NotificationSessionTests.testConcurrentResponsesCommitExactlyOnce と同じ発想)。
@@ -175,5 +192,33 @@ final class LaunchGuardTests: XCTestCase {
             exitCalledFromBackgroundCompletion.value,
             "exit must be driven by the async getDeliveredNotifications completion, not called inline synchronously"
         )
+    }
+
+    // MARK: - cleanUpAndExit must block the caller until the sweep completes (Requirement 6.3)
+
+    func testCleanUpAndExitBlocksUntilSweepCompletes() {
+        // 呼び出し元 (YobirinMain.main()) はcleanUpAndExitがreturnした直後にプロセスをexitさせうる。
+        // そのためcleanUpAndExitはexpectation/waitを使わず、呼び出しから戻った時点で
+        // 掃除(exit呼び出しとremoveDeliveredNotifications)が既に完了していなければならない。
+        let client = MockNotificationCenterClient()
+        let exitCalled = Recorder<Bool>(false)
+
+        LaunchGuard.cleanUpAndExit(client: client, exit: { _ in exitCalled.set(true) })
+
+        XCTAssertTrue(exitCalled.value, "cleanUpAndExit must not return before the sweep completed")
+        XCTAssertEqual(client.removeDeliveredCalls.count, 1)
+    }
+
+    // MARK: - timeout bounds the wait when the sweep never completes (Requirement 6.2)
+
+    func testCleanUpAndExitReturnsAfterTimeoutWhenSweepNeverCompletes() {
+        // UN側が稀にハングしても、Requirement 6.2の「即終了」を損なわないよう
+        // cleanUpAndExitはtimeoutで上限を超えて待ち続けないこと。
+        let client = NeverCompletingNotificationCenterClient()
+        let exitCalled = Recorder<Bool>(false)
+
+        LaunchGuard.cleanUpAndExit(client: client, timeout: .milliseconds(50), exit: { _ in exitCalled.set(true) })
+
+        XCTAssertFalse(exitCalled.value, "exit must not be called when the sweep never completes")
     }
 }
