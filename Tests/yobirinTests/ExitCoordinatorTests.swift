@@ -48,7 +48,8 @@ final class ExitCoordinatorTests: XCTestCase {
         var exitCodes: [Int32] = []
 
         let output = EmittedOutput(destination: .stdout, text: "x", exitCode: 0)
-        ExitCoordinator.finish(output, writer: { _, _ in }, scheduler: scheduler.schedule, exit: { exitCodes.append($0) })
+        ExitCoordinator.finish(
+            output, writer: { _, _ in }, scheduler: scheduler.schedule, exit: { exitCodes.append($0) })
 
         XCTAssertEqual(scheduler.scheduledCalls.count, 1)
         XCTAssertEqual(scheduler.scheduledCalls.first?.seconds, 1.0)
@@ -64,7 +65,8 @@ final class ExitCoordinatorTests: XCTestCase {
         var exitCodes: [Int32] = []
 
         let output = EmittedOutput(destination: .stderr, text: "denied", exitCode: 2)
-        ExitCoordinator.finish(output, writer: { _, _ in }, scheduler: scheduler.schedule, exit: { exitCodes.append($0) })
+        ExitCoordinator.finish(
+            output, writer: { _, _ in }, scheduler: scheduler.schedule, exit: { exitCodes.append($0) })
         scheduler.fireLast()
 
         XCTAssertEqual(exitCodes, [2])
@@ -75,7 +77,9 @@ final class ExitCoordinatorTests: XCTestCase {
         var writes: [(OutputDestination, String)] = []
 
         let output = EmittedOutput(destination: .stderr, text: "通知が許可されていません", exitCode: 2)
-        ExitCoordinator.finish(output, writer: { destination, text in writes.append((destination, text)) }, scheduler: scheduler.schedule, exit: { _ in })
+        ExitCoordinator.finish(
+            output, writer: { destination, text in writes.append((destination, text)) }, scheduler: scheduler.schedule,
+            exit: { _ in })
 
         XCTAssertEqual(writes.count, 1)
         XCTAssertEqual(writes.first?.0, .stderr)
@@ -90,7 +94,8 @@ final class ExitCoordinatorTests: XCTestCase {
         var writeCount = 0
 
         let output = EmittedOutput(destination: .stdout, text: "x", exitCode: 0)
-        ExitCoordinator.finish(output, writer: { _, _ in writeCount += 1 }, scheduler: scheduler.schedule, exit: { _ in })
+        ExitCoordinator.finish(
+            output, writer: { _, _ in writeCount += 1 }, scheduler: scheduler.schedule, exit: { _ in })
         scheduler.fireLast()
 
         XCTAssertEqual(writeCount, 1)

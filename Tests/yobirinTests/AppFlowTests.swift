@@ -1,5 +1,5 @@
-import XCTest
 import UserNotifications
+import XCTest
 
 @testable import yobirin
 
@@ -130,7 +130,8 @@ final class AppFlowTests: XCTestCase {
         let scheduler = MockScheduler()
         let session = NotificationSession(client: client, actions: [], onResult: { _ in })
         var emitted: [EmittedOutput] = []
-        let flow = AppFlow(client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
+        let flow = AppFlow(
+            client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
 
         flow.start(makeRequest())
         client.pendingAuthorizationCompletion?(false, NSError(domain: "UNErrorDomain", code: 1))
@@ -148,7 +149,8 @@ final class AppFlowTests: XCTestCase {
         let scheduler = MockScheduler()
         let session = NotificationSession(client: client, actions: [], onResult: { _ in })
         var emitted: [EmittedOutput] = []
-        let flow = AppFlow(client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
+        let flow = AppFlow(
+            client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
 
         flow.start(makeRequest())
         client.pendingAuthorizationCompletion?(false, nil)
@@ -173,7 +175,8 @@ final class AppFlowTests: XCTestCase {
                 emitted.append(ResultEmitter.forResult(ResultOutput(result: result, deliveredAt: nil)))
             }
         )
-        let flow = AppFlow(client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
+        let flow = AppFlow(
+            client: client, session: session, scheduler: scheduler.schedule, onOutput: { emitted.append($0) })
 
         flow.start(makeRequest(timeout: 5))
         client.pendingAuthorizationCompletion?(true, nil)

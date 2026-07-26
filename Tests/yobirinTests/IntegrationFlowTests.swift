@@ -1,5 +1,5 @@
-import XCTest
 import UserNotifications
+import XCTest
 
 @testable import yobirin
 
@@ -231,7 +231,8 @@ final class IntegrationFlowTests: XCTestCase {
         let client = MockNotificationCenterClient(recorder: recorder)
         let scheduler = MockScheduler()
         let emitted = Recorder<[EmittedOutput]>([])
-        let (flow, session) = makeConnectedChain(recorder: recorder, client: client, scheduler: scheduler, emitted: emitted)
+        let (flow, session) = makeConnectedChain(
+            recorder: recorder, client: client, scheduler: scheduler, emitted: emitted)
 
         flow.start(makeRequest(timeout: 5))
         client.pendingAuthorizationCompletion?(true, nil)
@@ -254,7 +255,8 @@ final class IntegrationFlowTests: XCTestCase {
         let client = MockNotificationCenterClient(recorder: recorder)
         let scheduler = MockScheduler()
         let emitted = Recorder<[EmittedOutput]>([])
-        let (flow, session) = makeConnectedChain(recorder: recorder, client: client, scheduler: scheduler, emitted: emitted)
+        let (flow, session) = makeConnectedChain(
+            recorder: recorder, client: client, scheduler: scheduler, emitted: emitted)
 
         flow.start(makeRequest(timeout: 5))
         client.pendingAuthorizationCompletion?(true, nil)

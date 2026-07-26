@@ -1,7 +1,7 @@
-import XCTest
-import UserNotifications
 import CoreGraphics
 import ImageIO
+import UserNotifications
+import XCTest
 
 @testable import yobirin
 
@@ -222,7 +222,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseDefaultActionEmitsClicked() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
 
@@ -231,7 +232,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseDismissActionEmitsDismissed() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: UNNotificationDismissActionIdentifier, userText: nil)
 
@@ -240,7 +242,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseActionIdentifierEmitsActionWithLabelAndIndex() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: ["Open", "Dismiss"], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: ["Open", "Dismiss"], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: "yobirin-action-1", userText: nil)
 
@@ -249,7 +252,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseWithDuplicateLabelsIdentifiesByIndexNotLabel() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: ["Open", "Open"], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: ["Open", "Open"], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: "yobirin-action-1", userText: nil)
 
@@ -258,7 +262,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseReplyIdentifierEmitsRepliedWithText() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: NotificationSessionIdentifiers.replyActionIdentifier, userText: "了解です")
 
@@ -267,7 +272,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseUnknownIdentifierDoesNotEmit() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: "com.apple.unknown", userText: nil)
 
@@ -276,7 +282,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleResponseOutOfRangeActionIndexDoesNotEmit() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: ["Open"], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: ["Open"], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: "yobirin-action-5", userText: nil)
 
@@ -285,7 +292,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testHandleTimeoutEmitsTimeout() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleTimeout()
 
@@ -296,7 +304,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testSecondResponseAfterCommitIsIgnored() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
         session.handleResponse(actionIdentifier: UNNotificationDismissActionIdentifier, userText: nil)
@@ -306,7 +315,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testTimeoutAfterResponseIsIgnored() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleResponse(actionIdentifier: UNNotificationDismissActionIdentifier, userText: nil)
         session.handleTimeout()
@@ -316,7 +326,8 @@ final class NotificationSessionTests: XCTestCase {
 
     func testResponseAfterTimeoutIsIgnored() {
         var results: [NotificationResult] = []
-        let session = NotificationSession(client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
+        let session = NotificationSession(
+            client: MockNotificationCenterClient(), actions: [], onResult: { results.append($0) })
 
         session.handleTimeout()
         session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
