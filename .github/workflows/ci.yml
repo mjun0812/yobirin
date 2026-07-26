@@ -14,7 +14,7 @@ jobs:
     name: Build & Test (macOS)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Show Swift version
         run: swift --version
       - name: Build
@@ -28,8 +28,8 @@ jobs:
     name: Lint shell & markdown (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
       - name: shellcheck
         run: mise exec -- shellcheck scripts/*.sh
       - name: shfmt
