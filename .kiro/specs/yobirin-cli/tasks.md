@@ -55,7 +55,7 @@
   - _Requirements: 5.5, 6.1, 6.2, 6.3_
 
 - [ ] 4. Integration: 配線・インストール・プロファイル
-- [ ] 4.1 全コンポーネントを結線してバンドルから動作させる
+- [x] 4.1 全コンポーネントを結線してバンドルから動作させる
   - 引数パース → 認可 → group置換 → category登録 → 配信 → 応答/タイマー → JSON出力 → 遅延exit の一連のフローを結線する
   - 初回は許可ダイアログへの手動応答が必要 (以降は自動で確認できる)
   - ~/Applications配置のバンドルをsymlink経由で直接実行し、timeout経路で結果JSONがstdoutへ返りexit 0となる
@@ -117,3 +117,5 @@
 - 3.1: レビュー提案: AppFlowレベルで「deliver throw→環境エラー出力」の結合テストを5.1で1本追加すると堅牢 (現状は各部品の単体テストでカバー)
 - 3.2: 遅延exitは `ExitCoordinator` (delay=1.0秒定数)、引数なしガードは `LaunchGuard.isArgumentlessLaunch` + `cleanUpAndExit` (掃除完了後にexit 0、遅延なし)。4.1はこの2部品を結線する
 - 3.2: `UNNotification` はSDK上init不可でテストfixtureを作れない。孤児掃除の複数通知ケースは手動検証5.4で確認する。レビュー提案: LaunchGuardTestsのMockNotificationCenterClientにロックまたは安全性コメントを追加 (非ブロッキング)
+- 4.1: 結線完了、timeout経路のe2e実証済み ({"result":"timeout"} + exit 0)。`~/Applications/Yobirin.app` 配置済み、scratchにsymlinkあり。通知許可は付与済み環境
+- 4.1: Yobirin.swiftの `NSApplication` 操作にmain actor警告3件 (Swift 6 isolation checking)。@MainActor付与はParsableCommand準拠と衝突しビルドが壊れるためFYIとして残置 (CLIエントリはmain thread実行で実行時リスクなし)。将来Swift toolchainがエラー化したら @preconcurrency 等で対処

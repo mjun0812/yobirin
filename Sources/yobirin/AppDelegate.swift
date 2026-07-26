@@ -11,8 +11,6 @@ import UserNotifications
 /// - `applicationDidFinishLaunching` からの `AppFlow.start` 起動
 /// - `UNUserNotificationCenterDelegate` コールバックの `NotificationSession` への転送
 ///
-/// - Note: `run()` からの `NSApplication` 起動配線そのもの (`YobirinCommand.run` の書き換え) は
-///   task 4.1 の範囲であり、このクラスはまだどこからも呼び出されない。
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private let request: NotificationRequest
     private let session: NotificationSession
@@ -55,5 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             userText: (response as? UNTextInputNotificationResponse)?.userText
         )
         completionHandler()
+    }
+
+    /// フォアグラウンド (アプリ実行中) でも通知をバナー表示させる。yobirinはワンショットで
+    /// 常時実行中のため、これがないと通知が表示されないまま応答を待ち続けてしまう。
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 }

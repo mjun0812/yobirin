@@ -1,6 +1,21 @@
+import AppKit
 import ArgumentParser
+import Foundation
 
+/// プロセスの実エントリポイント。引数なしガード (design.md AppLifecycle、
+/// Requirements 6.2, 6.3) はArgumentParserより先に効かなければならないため、
+/// `@main` はここに置き、`YobirinCommand` 側には付けない。
 @main
+enum YobirinMain {
+    static func main() {
+        if LaunchGuard.isArgumentlessLaunch(CommandLine.arguments) {
+            LaunchGuard.cleanUpAndExit(client: UNNotificationCenterAdapter(), exit: { exit($0) })
+        } else {
+            YobirinCommand.main()
+        }
+    }
+}
+
 struct YobirinCommand: ParsableCommand {
     @Option(help: "通知のタイトル")
     var title: String
@@ -60,5 +75,25 @@ struct YobirinCommand: ParsableCommand {
         )
     }
 
-    func run() throws {}
+    /// 引数パース → 認可 → group置換 → category登録 → 配信 → 応答/タイマー → JSON出力 → 遅延exit
+    /// の一連のフローを結線する (design.md System Flows、Requirements 3.6, 8.3)。
+    func run() throws {
+        let request = makeNotificationRequest()
+        let client = UNNotificationCenterAdapter()
+        let delegate = AppDelegate(
+            request: request,
+            client: client,
+            onOutput: { output in
+                ExitCoordinator.finish(
+                    output,
+                    writer: ExitCoordinator.defaultWriter,
+                    scheduler: DispatchQueueScheduler.schedule,
+                    exit: { Darwin.exit($0) }
+                )
+            }
+        )
+        let application = NSApplication.shared
+        application.delegate = delegate
+        application.run()
+    }
 }
