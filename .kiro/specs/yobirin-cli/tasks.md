@@ -30,14 +30,14 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 7.2, 7.3_
   - _Boundary: ResultEmitter_
 
-- [ ] 2.3 通知の配信と応答捕捉を実装する
+- [x] 2.3 通知の配信と応答捕捉を実装する
   - customDismissAction付きcategoryを呼び出しごとに動的登録し、actionは yobirin-action-\<index\>、replyはテキスト入力アクションとして登録する
   - --group指定時は同一identifierの配信済み通知を除去してから配信する
   - delegateコールバックで clicked / dismissed / action / replied を判別し、結果を確定する
   - 結果確定はロックまたはactorで一度きりを保証し、ポーリングは使わない
   - 通知センターへの依存はプロトコルで抽象化する (署名済みバンドル外のswift testでは実センターが例外死するため、テストはモックに対して行う)
   - 応答種別ごとの結果確定と二重確定の防止がモックを使ったテストで確認できる
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 3.5, 3.7, 3.8, 4.1, 4.2, 4.4_
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 3.5, 3.7, 3.8, 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 3. Core: アプリライフサイクルと権限フロー
 - [ ] 3.1 認可フローとタイムアウト制御を実装する
@@ -111,3 +111,5 @@
 - 1.2: ビルド成果物は `.build/app/Yobirin.app`。スモークテストは entitlement起因の起動不能 (Launchd job spawn failed) をexit非0で検出できることを破壊テストで確認済み
 - 2.1: `--reply [placeholder]` はswift-argument-parserの制約により `--reply` (Flag) + `--reply-placeholder <str>` の2オプション構成に変更 (design.md/requirements.md追従更新済み)。`--timeout` はDouble型 (TimeInterval互換)。通知リクエストモデルは `NotificationRequest` (Sources/yobirin/NotificationRequest.swift)
 - 2.1: 負値オプションのテストは `--timeout=-1` の `=` 構文が必要 (スペース区切りだとArgumentParser自体が弾き、自前バリデーション経路を検証できない)
+- 2.3: 通知センターは `NotificationCenterClient` プロトコルで抽象化 (実アダプタ: `UNNotificationCenterAdapter`)。応答判別はUN型を含まない `handleResponse(actionIdentifier:userText:)` で受ける。replyのidentifierは `yobirin-reply`
+- 2.3: **4.1の配線時の注意**: `NotificationSession` のコンストラクタ引数 `actions` は `request.actions` と同一の配列を渡すこと (categoryビルドと応答→label復元が別経路のため、不一致だとaction結果が壊れる)。`getDeliveredNotifications` はプロトコルに先行宣言済み (3.2の孤児掃除用)
