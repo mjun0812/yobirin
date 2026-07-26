@@ -138,3 +138,11 @@ specと手動検証チェックリストは `.kiro/specs/yobirin-cli/` に、設
 ## ライセンス
 
 [MIT](LICENSE)
+
+## 参考リンク
+
+- [vjeantet/alerter](https://github.com/vjeantet/alerter)：yobirinの設計の下敷きになった対話捕捉型の通知CLI。非推奨 `NSUserNotification` API上のポーリング却下検知によるメモリリークが、本ツールを作る動機になった。
+- [julienXX/terminal-notifier](https://github.com/julienXX/terminal-notifier)：alerterのfork元である古典的なmacOS通知CLI。
+- [777genius/claude-notifications-go / swift-notifier](https://github.com/777genius/claude-notifications-go/tree/main/swift-notifier)：XcodeプロジェクトなしにSwift Packageから署名済み `.app` バンドルを組み立てる方法の参考実装。
+- [IBM/mac-ibm-notifications](https://github.com/IBM/mac-ibm-notifications)：設計時に参照した、活発にメンテナンスされているSwift + `UserNotifications` 実装。
+- [Apple: UserNotifications framework](https://developer.apple.com/documentation/usernotifications)：yobirinが使っている通知API。

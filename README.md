@@ -129,3 +129,11 @@ Notification display, interaction, and the permission flow are GUI-dependent and
 ## License
 
 [MIT](LICENSE)
+
+## References
+
+- [vjeantet/alerter](https://github.com/vjeantet/alerter): the interactive notification CLI that inspired yobirin's design. Its memory leak under long-lived notifications (polling-based dismissal detection on the deprecated `NSUserNotification` API) is what motivated this rewrite.
+- [julienXX/terminal-notifier](https://github.com/julienXX/terminal-notifier): the classic macOS notification CLI that alerter was forked from.
+- [777genius/claude-notifications-go / swift-notifier](https://github.com/777genius/claude-notifications-go/tree/main/swift-notifier): the reference for assembling a signed `.app` bundle from a Swift Package without an Xcode project.
+- [IBM/mac-ibm-notifications](https://github.com/IBM/mac-ibm-notifications): an actively maintained Swift + `UserNotifications` implementation consulted during design.
+- [Apple: UserNotifications framework](https://developer.apple.com/documentation/usernotifications): the notification API yobirin is built on.
