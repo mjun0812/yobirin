@@ -16,7 +16,7 @@
   - _Requirements: 8.1, 8.2, 8.6, 9.1, 9.2, 9.3, 9.4_
 
 - [ ] 2. Core: CLI・結果出力・通知セッション
-- [ ] 2.1 (P) CLIオプションのパースと通知リクエストの組み立てを実装する
+- [x] 2.1 (P) CLIオプションのパースと通知リクエストの組み立てを実装する
   - --title / --message を必須とし、--subtitle / --group / --timeout / --action (複数可) / --reply (placeholder任意) / --sound / --image を受け付ける
   - パース結果を通知リクエストのモデルへ変換する。--icon に相当するオプションは提供しない
   - 必須欠落・不正値がエラーになり、各オプションの反映がunitテストで確認できる
@@ -109,3 +109,5 @@
 
 - 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい
 - 1.2: ビルド成果物は `.build/app/Yobirin.app`。スモークテストは entitlement起因の起動不能 (Launchd job spawn failed) をexit非0で検出できることを破壊テストで確認済み
+- 2.1: `--reply [placeholder]` はswift-argument-parserの制約により `--reply` (Flag) + `--reply-placeholder <str>` の2オプション構成に変更 (design.md/requirements.md追従更新済み)。`--timeout` はDouble型 (TimeInterval互換)。通知リクエストモデルは `NotificationRequest` (Sources/yobirin/NotificationRequest.swift)
+- 2.1: 負値オプションのテストは `--timeout=-1` の `=` 構文が必要 (スペース区切りだとArgumentParser自体が弾き、自前バリデーション経路を検証できない)
