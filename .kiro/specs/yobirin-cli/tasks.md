@@ -23,7 +23,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 4.1, 4.3, 5.1, 5.3_
   - _Boundary: YobirinCommand_
 
-- [ ] 2.2 (P) 結果JSONの生成と終了コード決定を実装する
+- [x] 2.2 (P) 結果JSONの生成と終了コード決定を実装する
   - 5種の結果 (clicked / action / replied / dismissed / timeout) それぞれのJSON (action / actionIndex / text / deliveredAt) を生成する
   - ユーザー応答はJSON + exit 0、許可なしはstderr + exit 2、環境エラーはJSONなし + 非0という区別を実装する
   - 各結果種別のJSON内容と終了コード分岐がunitテストで通る
