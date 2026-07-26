@@ -124,3 +124,4 @@
 - 5.4: **手動検証でバグ発見→修正 (commit 28fb36a)**: cleanUpAndExitが非同期掃除の完了を待たずreturnし、completion実行前にプロセスがexitして孤児掃除が機能していなかった。教訓: 「completionを待つ構造のモックテスト」は「実プロセスが待たずに死ぬ」バグを検出できない。exit系の非同期APIは「呼び出しがreturnする前に完了しているか」をテストすること
 - 5.2〜5.5: 手動検証全18項目pass (2026-07-27、記録は manual-verification.md)
 - 最終検証: `--image` の添付はOS受理まで機能するが、**macOS 26はサムネイルをバナー・通知センターとも描画しない** (画像サイズ・配置場所を変えて再現)。OS挙動の既知制限としてREADME (M4 OSS化時) に記載すること。LSUIElement=trueはInfo.plistの検証 (plutil) で確認済み (Dock非表示の目視は未取得だが、多数の検証実行中にDock表示の報告なし)
+- アイコン更新 (2026-07-27): 既存Bundle IDのバンドルアイコンを差し替えた場合、通知バナーのアイコンは**ログアウト/ログインまで反映されない** (実測: usernotificationsd/NotificationCenterの再起動・`lsregister -f` はいずれも無効、再ログインで反映)。Finder上のアイコンは即時反映される。README (M4) のアイコン差し替え手順に記載すること
