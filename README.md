@@ -107,7 +107,8 @@ This installs `Yobirin-Claude.app` and `Yobirin-Codex.app` with icons taken from
 ## Known limitations
 
 - `--image`: the attachment is accepted and stored by macOS, but current macOS versions do not render the thumbnail in banners or Notification Center.
-- Replacing the app icon of an already-installed bundle takes effect in notification banners only after logging out and back in (macOS caches notification source icons aggressively).
+- Notification banners composite transparent areas of the app icon over white. Design icons with an opaque rounded-tile background (leaving only the corners outside the tile transparent), the same way other macOS apps do.
+- Replacing the app icon of an already-installed bundle takes effect in notification banners only after logging out and back in (macOS caches notification source icons aggressively). Installing under a new bundle ID (a new profile name) shows the new icon immediately.
 - macOS only. There are no plans for Linux or Windows support.
 
 ## Uninstall

@@ -455,7 +455,7 @@ Homebrew formulaについては、**許可取得後なら `/opt/homebrew/Cellar/
 2. ~~**M2a (検証スパイク)**~~ **完了 (2026-07-26)**: 「M2a 実機検証結果」を参照。アイコン戦略・却下検知・動的categoryのすべてに結論が出た
 3. ~~**M2b (MVP)**~~ **完了 (2026-07-27)**: kiro spec `yobirin-cli` (`.kiro/specs/yobirin-cli/`) として全14タスクを実装・検証済み (最終検証GO)。alerter同等のフル機能 + JSON出力 + アイコンプロファイル機構 (派生バンドル + symlink方式)。手動検証で孤児通知掃除のバグを発見・修正した (実装ノート参照)。アプリアイコン (神社の鈴 + 鈴緒 + 青海波) も適用済み
 4. ~~**M4a (private公開)**~~ **完了 (2026-07-27)**: README日英2言語 (通知許可ダイアログの説明、既知の制限を含む) とMITライセンスを整備し、[github.com/mjun0812/yobirin](https://github.com/mjun0812/yobirin) へprivateでpush済み。dotfilesからのインストールをGitHub経由 (clone + `scripts/install.sh`) にするため、M3より先行した (2026-07-27にM3と順序を入れ替え。リポジトリは当初から独立して作られているため「リポジトリ分離」は不要になった)
-5. **M3**: dotfilesのhookの `alerter` 呼び出しを差し替え、実運用で放置テスト (メモリ・CPUの長期観測)
+5. **M3 (差し替え完了、放置テスト継続中)**: dotfilesのhook (`notify.sh` → `yobirin-wezterm-notify.sh`) をyobirinへ差し替え済み (2026-07-27、dotfiles commit `067191a`)。アイコンの出し分けはalerterの私用API `--app-icon` を捨て、プロファイル派生バンドル (`yobirin-claude` / `yobirin-codex`) で実現した。`notify.sh` の第4引数はPNGパスからプロファイル名へ変更。Claude/Codex両hook経路で通知配信とクリック→WezTerm pane活性化を実機確認済み。**残り: 実運用でのメモリ・CPUの長期観測**
 6. **M4b (public化)**: 実運用で安定を確認後にvisibilityをpublicへ変更。必要ならHomebrew tap (この段階でDeveloper ID署名 + notarizationを再検討)
 
 ## 未決事項 (詰めるポイント)
