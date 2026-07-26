@@ -130,7 +130,10 @@ $ rm -f ~/.local/bin/yobirin*
 ```console
 $ swift test              # ユニットテストと結合テスト (通知センターはモック)
 $ bash scripts/build-app.sh [profile]   # 署名済み.appバンドルのビルド
+$ prek install            # pre-commit hookの有効化 (swift format / shfmt / shellcheck / oxfmt)
 ```
+
+CI (GitHub Actions) は `main` へのpushとpull requestで、ビルド、テスト、lintを実行する。
 
 通知の表示、対話、許可フローはGUIに依存するため自動テストでは検証できない。
 specと手動検証チェックリストは `.kiro/specs/yobirin-cli/` に、設計の経緯と実測記録は `docs/design-research.md` にある。
