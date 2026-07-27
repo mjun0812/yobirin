@@ -7,10 +7,10 @@
 <p align="center"><b>yobirin</b> (呼び鈴) は、鳴らして応答を待つmacOS向けの通知CLIです。</p>
 
 <p align="center">
-  <a href="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml"><img src="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="Platform: macOS" />
-  <img src="https://img.shields.io/badge/Swift-6.0-orange" alt="Swift 6.0" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT" /></a>
+  <a href="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml"><img src="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml/badge.svg" alt="CI" height="20" /></a>
+  <img src="https://shieldcn.dev/badge/platform-macOS-gray.svg?size=xs" alt="Platform: macOS" height="20" />
+  <img src="https://shieldcn.dev/badge/Swift-6.0-orange.svg?size=xs" alt="Swift 6.0" height="20" />
+  <a href="LICENSE"><img src="https://shieldcn.dev/badge/license-MIT-blue.svg?size=xs" alt="License: MIT" height="20" /></a>
 </p>
 
 <p align="center"><a href="README.md">English README is here</a></p>
