@@ -2,125 +2,12 @@ import XCTest
 
 @testable import yobirin
 
+/// ルートコマンドのサブコマンド解決を検証する (design.md CLI契約、Requirement 11.8)。
+/// 従来形式 `yobirin --title <str> --message <str> ...` が既定サブコマンド `NotifyCommand` へ
+/// そのまま解決されることを確認する。
 final class YobirinCommandTests: XCTestCase {
-    // MARK: - Required options
-
-    func testParsesWithNoArgumentsFails() throws {
-        XCTAssertThrowsError(try YobirinCommand.parse([]))
-    }
-
-    func testMissingTitleFails() throws {
-        XCTAssertThrowsError(try YobirinCommand.parse(["--message", "body"]))
-    }
-
-    func testMissingMessageFails() throws {
-        XCTAssertThrowsError(try YobirinCommand.parse(["--title", "hello"]))
-    }
-
-    func testParsesRequiredOptionsOnly() throws {
-        let command = try YobirinCommand.parse(["--title", "hello", "--message", "body"])
-
-        XCTAssertEqual(command.title, "hello")
-        XCTAssertEqual(command.message, "body")
-        XCTAssertNil(command.subtitle)
-        XCTAssertNil(command.group)
-        XCTAssertNil(command.timeout)
-        XCTAssertEqual(command.action, [])
-        XCTAssertFalse(command.reply)
-        XCTAssertNil(command.replyPlaceholder)
-        XCTAssertNil(command.sound)
-        XCTAssertNil(command.image)
-    }
-
-    // MARK: - Individual options
-
-    func testParsesSubtitle() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--subtitle", "sub"])
-        XCTAssertEqual(command.subtitle, "sub")
-    }
-
-    func testParsesGroup() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--group", "build"])
-        XCTAssertEqual(command.group, "build")
-    }
-
-    func testParsesTimeout() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--timeout", "5"])
-        XCTAssertEqual(command.timeout, 5)
-    }
-
-    func testTimeoutZeroFails() throws {
-        XCTAssertThrowsError(try YobirinCommand.parse(["--title", "t", "--message", "m", "--timeout", "0"]))
-    }
-
-    func testTimeoutNegativeFails() throws {
-        // "--timeout" "-1" (スペース区切り) だとswift-argument-parserが "-1" をオプションらしき
-        // トークンとみなし、自前のparseTimeoutに到達する前に "Missing value" で弾いてしまう。
-        // "=" 構文にすることで確実にparseTimeoutのバリデーションを経由させる。
-        XCTAssertThrowsError(try YobirinCommand.parse(["--title", "t", "--message", "m", "--timeout=-1"]))
-    }
-
-    func testTimeoutNonNumericFails() throws {
-        XCTAssertThrowsError(try YobirinCommand.parse(["--title", "t", "--message", "m", "--timeout", "abc"]))
-    }
-
-    func testParsesMultipleActions() throws {
-        let command = try YobirinCommand.parse([
-            "--title", "t", "--message", "m",
-            "--action", "Open", "--action", "Dismiss",
-        ])
-        XCTAssertEqual(command.action, ["Open", "Dismiss"])
-    }
-
-    func testParsesNoActions() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m"])
-        XCTAssertEqual(command.action, [])
-    }
-
-    func testParsesReplyWithoutPlaceholder() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--reply"])
-        XCTAssertTrue(command.reply)
-        XCTAssertNil(command.replyPlaceholder)
-    }
-
-    func testParsesReplyWithPlaceholder() throws {
-        let command = try YobirinCommand.parse([
-            "--title", "t", "--message", "m",
-            "--reply", "--reply-placeholder", "返信を入力",
-        ])
-        XCTAssertTrue(command.reply)
-        XCTAssertEqual(command.replyPlaceholder, "返信を入力")
-    }
-
-    func testReplyPlaceholderWithoutReplyFails() throws {
-        XCTAssertThrowsError(
-            try YobirinCommand.parse([
-                "--title", "t", "--message", "m",
-                "--reply-placeholder", "返信を入力",
-            ])
-        )
-    }
-
-    func testParsesSound() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--sound", "default"])
-        XCTAssertEqual(command.sound, "default")
-    }
-
-    func testParsesImage() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m", "--image", "/tmp/icon.png"])
-        XCTAssertEqual(command.image, "/tmp/icon.png")
-    }
-
-    func testIconOptionIsNotProvided() throws {
-        XCTAssertThrowsError(
-            try YobirinCommand.parse(["--title", "t", "--message", "m", "--icon", "x"])
-        )
-    }
-
-    // MARK: - NotificationRequest conversion
-
-    func testMakeNotificationRequestReflectsAllOptions() throws {
-        let command = try YobirinCommand.parse([
+    func testDefaultSubcommandResolvesToNotifyCommandWithAllOptions() throws {
+        let parsed = try YobirinCommand.parseAsRoot([
             "--title", "t", "--message", "m",
             "--subtitle", "sub",
             "--group", "build",
@@ -130,33 +17,41 @@ final class YobirinCommandTests: XCTestCase {
             "--sound", "default",
             "--image", "/tmp/icon.png",
         ])
-        let request = command.makeNotificationRequest()
 
-        XCTAssertEqual(request.title, "t")
-        XCTAssertEqual(request.message, "m")
-        XCTAssertEqual(request.subtitle, "sub")
-        XCTAssertEqual(request.group, "build")
-        XCTAssertEqual(request.timeout, 5)
-        XCTAssertEqual(request.actions, ["Open", "Dismiss"])
-        XCTAssertTrue(request.replyEnabled)
-        XCTAssertEqual(request.replyPlaceholder, "返信を入力")
-        XCTAssertEqual(request.sound, "default")
-        XCTAssertEqual(request.image, "/tmp/icon.png")
+        guard let notify = parsed as? NotifyCommand else {
+            XCTFail("従来形式の引数はNotifyCommandへ解決されるべき")
+            return
+        }
+
+        XCTAssertEqual(notify.title, "t")
+        XCTAssertEqual(notify.message, "m")
+        XCTAssertEqual(notify.subtitle, "sub")
+        XCTAssertEqual(notify.group, "build")
+        XCTAssertEqual(notify.timeout, 5)
+        XCTAssertEqual(notify.action, ["Open", "Dismiss"])
+        XCTAssertTrue(notify.reply)
+        XCTAssertEqual(notify.replyPlaceholder, "返信を入力")
+        XCTAssertEqual(notify.sound, "default")
+        XCTAssertEqual(notify.image, "/tmp/icon.png")
     }
 
-    func testMakeNotificationRequestWithOnlyRequiredOptions() throws {
-        let command = try YobirinCommand.parse(["--title", "t", "--message", "m"])
-        let request = command.makeNotificationRequest()
+    func testDefaultSubcommandResolvesToNotifyCommandWithRequiredOptionsOnly() throws {
+        let parsed = try YobirinCommand.parseAsRoot(["--title", "hello", "--message", "body"])
 
-        XCTAssertEqual(request.title, "t")
-        XCTAssertEqual(request.message, "m")
-        XCTAssertNil(request.subtitle)
-        XCTAssertNil(request.group)
-        XCTAssertNil(request.timeout)
-        XCTAssertEqual(request.actions, [])
-        XCTAssertFalse(request.replyEnabled)
-        XCTAssertNil(request.replyPlaceholder)
-        XCTAssertNil(request.sound)
-        XCTAssertNil(request.image)
+        guard let notify = parsed as? NotifyCommand else {
+            XCTFail("従来形式の引数はNotifyCommandへ解決されるべき")
+            return
+        }
+
+        XCTAssertEqual(notify.title, "hello")
+        XCTAssertEqual(notify.message, "body")
+        XCTAssertNil(notify.subtitle)
+        XCTAssertNil(notify.group)
+        XCTAssertNil(notify.timeout)
+        XCTAssertEqual(notify.action, [])
+        XCTAssertFalse(notify.reply)
+        XCTAssertNil(notify.replyPlaceholder)
+        XCTAssertNil(notify.sound)
+        XCTAssertNil(notify.image)
     }
 }
