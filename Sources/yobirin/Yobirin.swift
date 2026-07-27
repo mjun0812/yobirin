@@ -79,6 +79,7 @@ enum LaunchGate {
 /// (Requirement 11.8)。
 struct YobirinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
+        commandName: "yobirin",
         version: YobirinVersion.current,
         subcommands: [NotifyCommand.self, InstallCommand.self, ListCommand.self, PsCommand.self],
         defaultSubcommand: NotifyCommand.self
