@@ -241,6 +241,7 @@ flowchart TD
 | 13          | ビルド済みバイナリの配布       | Release CI                                         | -                             | -                         |
 | 14          | インストール済みバンドルの一覧 | ListCommand, ProfileDispatch (ProfileNaming逆引き) | CLI契約 (list) / 一覧JSON契約 | 起動ゲートフロー          |
 | 15          | 待機中プロセスの一覧           | PsCommand, ProfileDispatch (ProfileNaming逆引き)   | CLI契約 (ps) / psJSON契約     | 起動ゲートフロー          |
+| 16          | アイコン変更時の反映遅延の案内 | Installer, InstallCommand                          | -                             | インストールフロー        |
 
 ## Components and Interfaces
 
@@ -249,10 +250,10 @@ flowchart TD
 | YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12       | swift-argument-parser (P0)   | CLI             |
 | NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証         | 1, 2, 4, 5   | swift-argument-parser (P0)   | CLI             |
 | ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec               | 10           | Darwin execv (P0)            | CLI             |
-| InstallCommand      | Install      | installサブコマンドの引数定義                                | 11           | swift-argument-parser (P0)   | CLI             |
+| InstallCommand      | Install      | installサブコマンドの引数定義                                | 11, 16       | swift-argument-parser (P0)   | CLI             |
 | ListCommand         | Install      | インストール済みバンドルの走査と一覧出力 (テキスト / JSON)   | 14           | swift-argument-parser (P0)   | CLI, API (JSON) |
 | PsCommand           | Install      | 通知待機プロセスの走査と一覧出力 (テキスト / JSON)           | 15           | Darwin sysctl / libproc (P0) | CLI, API (JSON) |
-| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証          | 8, 9, 11     | 外部codesign (P0)            | Batch           |
+| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証          | 8, 9, 11, 16 | 外部codesign (P0)            | Batch           |
 | IcnsWriter          | Install      | ImageIOによるicns生成 (10スロット)                           | 11           | ImageIO (P0)                 | -               |
 | DefaultIcon         | Install      | 同梱標準アイコンのバイト列 (生成済みソース)                  | 11           | -                            | -               |
 | AppLifecycle        | App          | NSApplication起動、認可フロー、引数なしガード、遅延exit      | 5, 6, 7      | AppKit (P0)                  | -               |
@@ -387,7 +388,7 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 | Field        | Detail                                                          |
 | ------------ | --------------------------------------------------------------- |
 | Intent       | CLI自身によるバンドル組み立て・配置・検証 (実装はこの1箇所のみ) |
-| Requirements | 8, 9, 11                                                        |
+| Requirements | 8, 9, 11, 16                                                    |
 
 **Responsibilities & Constraints**
 
@@ -398,6 +399,8 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 - 署名は外部 `codesign` を `Process` で起動 (API不在のため。素のMach-Oからの起動可否は実測済み)。entitlementは一切付けない
 - 配置は「固定パス検証 → 旧バンドル削除 → コピー → symlink張り替え (非symlink実ファイルは非破壊で中断)」の順。旧 `install.sh` の安全策を踏襲
 - 起動検証: `codesign --verify --deep --strict` + 配置済みsymlink経由の `--help` 実行。失敗時は非0で終了 (Requirement 11.9)
+- **アイコン変化の検出 (Requirement 16)**: 旧バンドル削除の前に既存の `Contents/Resources/AppIcon.icns` を読み取り、新icnsとバイト比較する。installは「既存バンドルを置き換えたか」「アイコンが変化したか」を結果として呼び出し元へ返す (旧icnsが読み取れない場合は変化扱い — 16.4の安全側)。この検出はインストールの成否・終了コードに影響しない (16.5)
+- InstallCommandは「置き換え かつ アイコン変化」のときだけ、完了メッセージに続けて反映遅延の案内 (ログアウト→ログインが必要 / 新プロファイル名なら即時反映) をstdoutへ1行出す (16.1〜16.3)。それ以外は何も出さない
 
 ##### Batch / Job Contract
 
@@ -617,6 +620,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - ListCommand: 命名規約の往復一致判定 (対象 / 除外の両方)、順序 (デフォルト先頭 + 名前昇順)、Info.plist欠損時の `-` / `null` 表示と継続、0件のexit 0、`--json` のスキーマ (テンポラリ領域に偽バンドルを構成して検証 — 14.2〜14.8)
 - ProfileNaming逆引き: バンドル名 → プロファイル名の往復一致、規約外名の棄却 (14.7)
 - PsCommand: 対象判定 (バンドル内パス × `--title` 有無のAND。install/list/ps/掃除/自PIDの除外)、argvからのタイトル・タイムアウト抽出 (`--title x` / `--title=x` 両形式)、順序 (起動時刻昇順 + PIDタイブレーク)、argv欠損の `-` / `null` 継続、0件のexit 0、走査失敗の非0、経過時間の整形、`--json` のスキーマ (fakeレコード注入で検証 — 15.2〜15.8)
+- アイコン変更案内: 新規 / 不変上書き / 変化上書き / 旧icns読み取り不能の4分岐で案内の有無が正しいこと、案内の有無で終了コードが変わらないこと (テンポラリ領域のInstallerテスト + fake注入のInstallCommandテスト — 16.1〜16.5)
 
 ### Integration Tests (半自動)
 
