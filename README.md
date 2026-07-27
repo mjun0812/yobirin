@@ -125,8 +125,8 @@ Profile names must match `^[a-z0-9]+$`. Omitting `--icon` installs the bundled d
 ```console
 $ yobirin list
 PROFILE    BUNDLE ID                    VERSION  PATH
-(default)  com.mjun0812.yobirin         0.2.0    /Users/you/Applications/Yobirin.app
-claude     com.mjun0812.yobirin.claude  0.2.0    /Users/you/Applications/Yobirin-Claude.app
+(default)  com.mjun0812.yobirin         0.3.0    /Users/you/Applications/Yobirin.app
+claude     com.mjun0812.yobirin.claude  0.3.0    /Users/you/Applications/Yobirin-Claude.app
 ```
 
 ## Known limitations
