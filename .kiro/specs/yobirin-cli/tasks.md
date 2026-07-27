@@ -229,6 +229,25 @@
   - _Requirements: 16.1, 16.2, 16.3, 16.4, 16.5_
   - _Boundary: Installer, InstallCommand_
 
+- [ ] 13. Core: バンドル外バイナリからの透過ディスパッチ
+- [ ] 13.1 ホーム解決の一元化とディスパッチ判定を実装する
+  - `ProfileNaming` のホームディレクトリ解決を `YOBIRIN_HOME` 環境変数 (未設定時は従来どおり) へ一元化し、ListCommand / PsCommand / Installer の解決呼び出しも同じ経路へ揃える
+  - 既存のバンドル外プロセステストへ `YOBIRIN_HOME` を付与し、実マシンのインストール状態から独立させる
+  - 起動ゲートの判定へ「デフォルトバンドルのMach-Oが存在するか」を加え、バンドル外の通知系/引数なしが「インストール済みなら引き継ぎ・未インストールなら従来の案内」へ分岐する (純粋関数として)。エントリポイントからの実配線 (実際のバンドル存在判定を渡すこと) は次タスクで行い、本タスクの時点では従来入力での呼び出しを維持して挙動を変えない
+  - バンドルのInfo.plistと自身のバージョン定数を比較する判定を実装する (一致は無言、不一致は更新案内の文言)。Info.plistの読み取りは既存のListCommandの実装と重複させず共有する
+  - install / list / ps / --help / --version のゲート判定は変わらない
+  - ゲートの新マトリクス (バンドル外×通知系/引数なし×バンドル有無) とバージョン比較の分岐がテストで確認でき、`swift test` が全green
+  - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.6, 17.7_
+  - _Boundary: Yobirin (LaunchGate), ProfileDispatch (ProfileNaming), BundleEnvironment, ListCommand, PsCommand, Installer (ホーム解決の呼び出し箇所のみ)_
+
+- [ ] 13.2 引き継ぎを結線して確認する
+  - エントリポイントへ実際のバンドル存在判定を配線し、ゲート決定に応じてバンドル内Mach-Oへexecvで引き継ぐ (argv[0]差し替え・引数の透過・バージョン不一致のstderr案内・exec失敗の環境エラー)
+  - `YOBIRIN_HOME` のテンポラリ領域に偽バンドル (実行可能なスタブ) を置いた結合テストで、引き継ぎの引数透過・バージョン不一致のstderr案内・未インストール時の案内fallbackが確認できる
+  - manual-verification.md と design.md の手動検証チェックリストへ透過ディスパッチの項目 (素のバイナリからの通知配信・引数なし掃除の引き継ぎ・バージョン不一致案内の目視) を追記して実施する
+  - 実機でPATH上の素のバイナリ経由の通知が配信され、`swift test` で全テストが通る
+  - _Requirements: 17.1, 17.2, 17.4, 17.5, 17.7_
+  - _Depends: 13.1_
+
 ## Implementation Notes
 
 - 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい

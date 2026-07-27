@@ -86,6 +86,8 @@ yobirinがアプリ (`.app`) である理由は `UNUserNotificationCenter` が�
 - インストール系は通知APIの型に一切触れない。素のMach-O (リリースから落とした直後のバイナリ) で完走する (Requirement 12.1。実測: ArgumentParserはマッチした葉コマンドの `run()` だけを呼ぶため構造的に保証できる)
 - 起動フローの最初に**バンドル外検知** (`Bundle.main.bundleIdentifier == nil`) を置き、バンドル外での通知系要求は案内メッセージ + 非0終了に振り替える (Requirement 12.2/12.3。現状は `UNNotificationCenterAdapter` の非lazyな格納プロパティによりSIGABRTする — 実測)
 - ただし**CFBundleは実行パスのsymlinkを解決しない** (実測: PATH上のsymlink経由のexecでは、バンドル内実体を指していても `Bundle.main.bundleIdentifier` がnilになる。UN層のLaunchServicesはrealpathで解決するため通知自体は出せる)。バンドル未解決かつ実行パスがrealpathと異なる場合は、判定より先に**実体パスへ再exec**して直接実行と同一条件に正規化する。再exec後は実行パス==realpathのため再帰は起きない
+- **バンドル外の通知系要求は、デフォルトバンドルがインストール済みなら案内ではなくディスパッチする** (Requirement 17)。mise等のパッケージマネージャが配置した素のバイナリからでも、インストール済みバンドルのMach-Oへexecで引き継いで通知を出せる。引き継ぎ先はバンドル内実行になるため再帰しない。バージョン不一致はstderrへ1行案内して続行する (Requirement 12.2/12.3の案内は未インストール時のfallbackとなる)
+- **バンドル配置のルートは `YOBIRIN_HOME` 環境変数で上書き可能** (未設定時は `NSHomeDirectory()`)。`NSHomeDirectory()` は子プロセスの `HOME` を反映しない (実測) ため、結合テストはこの変数でバンドル探索・配置先をテンポラリ領域へ密閉する。命名規約 (`ProfileNaming`) のホーム解決に一元化する
 - 配布物と実体は単一バイナリのまま (自己複製でバンドルを組み立てるため、分割すると「1つ落とせば済む」が成立しない)
 
 #### .appバンドル必須問題
@@ -193,7 +195,9 @@ flowchart TD
     noargs -->|はい| sweep[孤児通知の掃除 → exit 0]
     noargs -->|いいえ| route[ArgumentParserルーティング]
     outCmd -->|install / list / ps / --help| route
-    outCmd -->|通知系 / 引数なし| guide[インストール案内をstderrへ → 非0 exit<br>クラッシュさせない]
+    outCmd -->|通知系 / 引数なし| installed{デフォルトバンドル<br>インストール済み?}
+    installed -->|はい| handoff[バンドル内Mach-Oへexecで引き継ぎ<br>バージョン不一致はstderrへ案内]
+    installed -->|いいえ| guide[インストール案内をstderrへ → 非0 exit<br>クラッシュさせない]
     route --> notify[notify 通知送信<br>既定サブコマンド]
     route --> install[install バンドル組み立て]
     route --> list[list インストール済みバンドルの一覧]
@@ -224,30 +228,31 @@ flowchart TD
 
 ## Requirements Traceability
 
-| Requirement | Summary                        | Components                                         | Interfaces                    | Flows                     |
-| ----------- | ------------------------------ | -------------------------------------------------- | ----------------------------- | ------------------------- |
-| 1           | 通知の送信                     | YobirinCommand, NotificationSession                | CLI契約                       | メインフロー              |
-| 2           | グループによる置き換え         | NotificationSession                                | CLI契約 (`--group`)           | メインフロー              |
-| 3           | 応答の捕捉と結果JSON出力       | NotificationSession, ResultEmitter                 | 出力JSON契約                  | メインフロー              |
-| 4           | アクションボタンとreply入力    | YobirinCommand, NotificationSession                | CLI契約 / 出力JSON契約        | メインフロー              |
-| 5           | タイムアウトとライフサイクル   | AppLifecycle, NotificationSession                  | CLI契約 (`--timeout`)         | タイムアウト分岐          |
-| 6           | 再起動への防御                 | AppLifecycle                                       | -                             | 遅延exit / 引数なしガード |
-| 7           | 通知許可とエラー処理           | AppLifecycle, ResultEmitter                        | 終了コード契約                | 許可なし分岐              |
-| 8           | .appバンドルと配布構成         | Installer, Install layout                          | -                             | インストールフロー        |
-| 9           | ビルドパイプライン             | Release CI, Installer                              | -                             | -                         |
-| 10          | アイコンプロファイル           | ProfileDispatch, Installer                         | CLI契約 (`--profile`)         | 起動ゲートフロー          |
-| 11          | CLIによるインストール          | InstallCommand, Installer, IcnsWriter, DefaultIcon | CLI契約 (install)             | インストールフロー        |
-| 12          | バンドル外実行時の安全性       | Yobirin (起動ゲート), NotificationCenterClient     | -                             | 起動ゲートフロー          |
-| 13          | ビルド済みバイナリの配布       | Release CI                                         | -                             | -                         |
-| 14          | インストール済みバンドルの一覧 | ListCommand, ProfileDispatch (ProfileNaming逆引き) | CLI契約 (list) / 一覧JSON契約 | 起動ゲートフロー          |
-| 15          | 待機中プロセスの一覧           | PsCommand, ProfileDispatch (ProfileNaming逆引き)   | CLI契約 (ps) / psJSON契約     | 起動ゲートフロー          |
-| 16          | アイコン変更時の反映遅延の案内 | Installer, InstallCommand                          | -                             | インストールフロー        |
+| Requirement | Summary                        | Components                                            | Interfaces                    | Flows                     |
+| ----------- | ------------------------------ | ----------------------------------------------------- | ----------------------------- | ------------------------- |
+| 1           | 通知の送信                     | YobirinCommand, NotificationSession                   | CLI契約                       | メインフロー              |
+| 2           | グループによる置き換え         | NotificationSession                                   | CLI契約 (`--group`)           | メインフロー              |
+| 3           | 応答の捕捉と結果JSON出力       | NotificationSession, ResultEmitter                    | 出力JSON契約                  | メインフロー              |
+| 4           | アクションボタンとreply入力    | YobirinCommand, NotificationSession                   | CLI契約 / 出力JSON契約        | メインフロー              |
+| 5           | タイムアウトとライフサイクル   | AppLifecycle, NotificationSession                     | CLI契約 (`--timeout`)         | タイムアウト分岐          |
+| 6           | 再起動への防御                 | AppLifecycle                                          | -                             | 遅延exit / 引数なしガード |
+| 7           | 通知許可とエラー処理           | AppLifecycle, ResultEmitter                           | 終了コード契約                | 許可なし分岐              |
+| 8           | .appバンドルと配布構成         | Installer, Install layout                             | -                             | インストールフロー        |
+| 9           | ビルドパイプライン             | Release CI, Installer                                 | -                             | -                         |
+| 10          | アイコンプロファイル           | ProfileDispatch, Installer                            | CLI契約 (`--profile`)         | 起動ゲートフロー          |
+| 11          | CLIによるインストール          | InstallCommand, Installer, IcnsWriter, DefaultIcon    | CLI契約 (install)             | インストールフロー        |
+| 12          | バンドル外実行時の安全性       | Yobirin (起動ゲート), NotificationCenterClient        | -                             | 起動ゲートフロー          |
+| 13          | ビルド済みバイナリの配布       | Release CI                                            | -                             | -                         |
+| 14          | インストール済みバンドルの一覧 | ListCommand, ProfileDispatch (ProfileNaming逆引き)    | CLI契約 (list) / 一覧JSON契約 | 起動ゲートフロー          |
+| 15          | 待機中プロセスの一覧           | PsCommand, ProfileDispatch (ProfileNaming逆引き)      | CLI契約 (ps) / psJSON契約     | 起動ゲートフロー          |
+| 16          | アイコン変更時の反映遅延の案内 | Installer, InstallCommand                             | -                             | インストールフロー        |
+| 17          | 透過ディスパッチ               | Yobirin (起動ゲート), ProfileDispatch (ProfileNaming) | -                             | 起動ゲートフロー          |
 
 ## Components and Interfaces
 
 | Component           | Domain/Layer | Intent                                                       | Req Coverage | Key Dependencies             | Contracts       |
 | ------------------- | ------------ | ------------------------------------------------------------ | ------------ | ---------------------------- | --------------- |
-| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12       | swift-argument-parser (P0)   | CLI             |
+| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12, 17   | swift-argument-parser (P0)   | CLI             |
 | NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証         | 1, 2, 4, 5   | swift-argument-parser (P0)   | CLI             |
 | ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec               | 10           | Darwin execv (P0)            | CLI             |
 | InstallCommand      | Install      | installサブコマンドの引数定義                                | 11, 16       | swift-argument-parser (P0)   | CLI             |
@@ -274,9 +279,11 @@ flowchart TD
 **Responsibilities & Constraints**
 
 - ルートは `CommandConfiguration(subcommands: [NotifyCommand, InstallCommand], defaultSubcommand: NotifyCommand)`。既存の `yobirin --title ...` はNotifyCommandへ解決され互換を保つ (Requirement 11.8)
-- 起動ゲート (エントリポイント) の判定順: バンドル外検知 → (バンドル内なら) 引数なしガード → ArgumentParserルーティング。バンドル外では通知系と引数なしをインストール案内 + 非0終了へ振り替える (Requirement 12)
+- 起動ゲート (エントリポイント) の判定順: バンドル外検知 → (バンドル内なら) 引数なしガード → ArgumentParserルーティング。バンドル外の通知系と引数なしは、デフォルトバンドルがインストール済みならそのMach-Oへexecで引き継ぎ (Requirement 17)、未インストールならインストール案内 + 非0終了へ振り替える (Requirement 12)
+- **透過ディスパッチの詳細** (Requirement 17): 判定は `LaunchGate.decide` へ「デフォルトバンドルのMach-Oが存在するか」を注入して行い、新しい決定 `.execInstalledBundle` を返す。配線側はargv[0]をバンドル内Mach-Oのパスへ差し替えて `execv` する (機構は `ProfileDispatch.defaultExec` を共用。`--profile` 付きの引数もそのまま透過し、バンドル内のNotifyCommand経由でプロファイルへ二段ディスパッチされる)。exec前にバンドルのInfo.plist (`CFBundleShortVersionString`) と自身の `YobirinVersion.current` を比較し、不一致ならstderrへ更新案内を1行出して続行する (17.4。stdoutは汚さない)。exec失敗は環境エラー (17.5)。引き継ぎ先はバンドル内実行のため再帰は構造的に起きない (17.7)
 - `NotificationCenterClient` の `center` は遅延評価へ修正し、型への参照だけでクラッシュする地雷を除去する (実測: 非lazy格納プロパティがSIGABRTの真因)
 - ProfileDispatch: NotifyCommandが `--profile` を受けたとき、`ProfileNaming` で導出したバンドル内Mach-Oへ `execv` する。引数は `--profile` を除いて透過し、再ディスパッチは構造的に起きない。対象未インストールは環境エラー (Requirement 10.5)
+- `ProfileNaming` のホームディレクトリ解決は `YOBIRIN_HOME` 環境変数 (未設定時は `NSHomeDirectory()`) に一元化し、install / list / ps / ディスパッチのすべてが同じ解決を使う。`NSHomeDirectory()` が子プロセスの `HOME` を反映しないという実測制約の回避策であり、結合テストはこの変数でテンポラリ領域へ密閉する
 
 ##### CLI契約
 
@@ -620,6 +627,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - ListCommand: 命名規約の往復一致判定 (対象 / 除外の両方)、順序 (デフォルト先頭 + 名前昇順)、Info.plist欠損時の `-` / `null` 表示と継続、0件のexit 0、`--json` のスキーマ (テンポラリ領域に偽バンドルを構成して検証 — 14.2〜14.8)
 - ProfileNaming逆引き: バンドル名 → プロファイル名の往復一致、規約外名の棄却 (14.7)
 - PsCommand: 対象判定 (バンドル内パス × `--title` 有無のAND。install/list/ps/掃除/自PIDの除外)、argvからのタイトル・タイムアウト抽出 (`--title x` / `--title=x` 両形式)、順序 (起動時刻昇順 + PIDタイブレーク)、argv欠損の `-` / `null` 継続、0件のexit 0、走査失敗の非0、経過時間の整形、`--json` のスキーマ (fakeレコード注入で検証 — 15.2〜15.8)
+- 透過ディスパッチ: `LaunchGate.decide` の新マトリクス (バンドル外×通知系/引数なし×バンドル有無)、バージョン比較の分岐 (一致で無言・不一致でstderr案内)、install/list/ps/--helpが引き継がれないこと (17.1〜17.7の判定部)
 - アイコン変更案内: 新規 / 不変上書き / 変化上書き / 旧icns読み取り不能の4分岐で案内の有無が正しいこと、案内の有無で終了コードが変わらないこと (テンポラリ領域のInstallerテスト + fake注入のInstallCommandテスト — 16.1〜16.5)
 
 ### Integration Tests (半自動)
@@ -629,6 +637,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - 結果確定の排他: 応答とタイマーの競合で出力が一度きりであること
 - 実プロセス起動: バンドル外の実バイナリで `list` が通知APIに触れず完走する (14.10。既存のProcessLaunchIntegrationTestsの枠組みを使う。実ホームを読むだけの読み取り専用なので安全)
 - 実プロセス起動: バンドル外の実バイナリで `ps` / `ps --json` が通知APIに触れず完走する (15.9。プロセス走査は読み取り専用。assertは実環境の内容に依存しない形状確認のみ)
+- 実プロセス起動 (透過ディスパッチ): `YOBIRIN_HOME` をテンポラリ領域へ向けて密閉した上で — (a) バンドルなし → 従来どおり案内 + 非0 (既存テストへ `YOBIRIN_HOME` を付与して実マシンのインストール状態から独立させる)、(b) 偽バンドル (実行可能なスタブをMach-Oとして配置) → 引き継ぎ先が引数透過つきで実行される、(c) Info.plistのバージョンを変えた偽バンドル → stderrに更新案内が出る (17.1〜17.5)
 
 ### 手動検証チェックリスト (GUI必須)
 
@@ -639,7 +648,8 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - 引数なし起動で通知が出ないこと。即exit再起動による余計な通知が出ないこと
 - 複数インスタンス並行実行で、クリックしたインスタンスにのみ応答が届くこと
 - リリースバイナリからのフルブートストラップ: 素のリリースバイナリで `install` → symlink経由で通知が出る → `install --profile <name> --icon <path>` → `--profile <name>` で当該アイコン・名義の通知が出る
-- バンドル外の素のバイナリで: 引数なし起動と通知送信がクラッシュせず案内 + 非0で終了すること (クラッシュレポートが生成されないこと)
+- バンドル外の素のバイナリで: デフォルトバンドル未インストール時に、引数なし起動と通知送信がクラッシュせず案内 + 非0で終了すること (クラッシュレポートが生成されないこと)
+- 透過ディスパッチ: PATH上の素のバイナリからの通知要求・引数なし起動が、導入済みデフォルトバンドルへ引き継がれて実際に通知配信・孤児掃除が行われること。バージョン不一致時のstderr案内が実際に表示されること
 
 ## Supporting References
 
