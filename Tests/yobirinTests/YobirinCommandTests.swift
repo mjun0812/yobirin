@@ -35,6 +35,15 @@ final class YobirinCommandTests: XCTestCase {
         XCTAssertEqual(notify.image, "/tmp/icon.png")
     }
 
+    func testListSubcommandResolvesToListCommand() throws {
+        let parsed = try YobirinCommand.parseAsRoot(["list"])
+
+        guard parsed is ListCommand else {
+            XCTFail("\"list\" はListCommandへ解決されるべき")
+            return
+        }
+    }
+
     func testDefaultSubcommandResolvesToNotifyCommandWithRequiredOptionsOnly() throws {
         let parsed = try YobirinCommand.parseAsRoot(["--title", "hello", "--message", "body"])
 

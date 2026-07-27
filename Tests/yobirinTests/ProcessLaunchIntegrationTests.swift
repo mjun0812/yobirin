@@ -161,6 +161,25 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
+    // MARK: - A. list (バンドル外、実プロセス起動)
+    // (Requirements 14.1, 14.5, 14.10。実ホームの内容に依存する項目の有無はここでは検証せず、
+    // 「通知APIに触れずクラッシュなく完走する」ことをexit 0・stderr空・出力形状のみで確認する。)
+
+    func testOutsideBundleWithListCompletesWithoutTouchingNotificationAPI() throws {
+        let result = try runYobirin(arguments: ["list"])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
+    func testOutsideBundleWithListJSONCompletesWithoutTouchingNotificationAPI() throws {
+        let result = try runYobirin(arguments: ["list", "--json"])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stderr.isEmpty)
+        XCTAssertTrue(result.stdout.hasPrefix("{\"bundles\":"))
+    }
+
     // MARK: - A. symlink経由起動 (実体パスへの再exec。design.md CLIとアプリの二面性)
 
     func testSymlinkToPlainBinaryReExecsAndStillGuidesInstallWithoutRecursion() throws {
