@@ -21,19 +21,20 @@ PATH上のsymlink → ~/Applications/Yobirin.app/Contents/MacOS/yobirin (直接�
 - **Language**: Swift
 - **Frameworks**: UserNotifications, AppKit
 - **配布形態**: `.app` バンドル + PATH上のsymlink
-- **ビルド**: Swift Package (executableTarget) + シェルスクリプトでバンドル組み立て。Xcodeプロジェクトは使わない
+- **ビルド**: Swift Package (executableTarget)。バンドル組み立てはCLI自身の `install` サブコマンド (自己バイナリ複製 + ImageIOでのicns生成 + 外部codesign)。Xcodeプロジェクトもシェルスクリプトも使わない
 
 ## Development Environment
 
 ### Required Tools
 
-- Xcode Command Line Tools (`swiftc`, `codesign`, `lipo`, `sips`, `iconutil`)
+- Xcode Command Line Tools (`swiftc`, `codesign`。releaseワークフローのユニバーサル化に `lipo`)
 
 ### Common Commands
 
 ```bash
-# Build: scripts/build-app.sh   (swift build ×2アーキ → lipo → バンドル組み立て → 署名 → 起動スモークテスト)
-# Install: ~/Applications へバンドル配置 + PATHにsymlink
+# Build + Install: swift build -c release && .build/release/yobirin install
+#   (自己バイナリ複製 → Info.plist生成 → icns焼き込み → ad-hoc署名 → ~/Applications 配置 → symlink → 起動検証)
+# Profile: yobirin install --profile <name> --icon <path>
 ```
 
 ## Key Technical Decisions

@@ -27,23 +27,28 @@ yobirinは現行の `UserNotifications` frameworkだけを使う。
 
 ## インストール
 
+### リリースバイナリから (ツールチェーン不要)
+
+ビルド済みユニバーサルバイナリをダウンロードして、バイナリ自身にインストールさせる (privateリポジトリの間は [gh CLI](https://cli.github.com/) が必要):
+
+```console
+$ gh release download --repo mjun0812/yobirin --pattern yobirin-universal
+$ chmod +x yobirin-universal
+$ ./yobirin-universal install
+```
+
+バイナリは自分自身を複製してad-hoc署名した `Yobirin.app` を組み立て、`~/Applications` へ配置して、コマンドを `~/.local/bin/yobirin` へsymlinkする (`~/.local/bin` をPATHに通すか、`YOBIRIN_BIN_DIR` で配置先を変更する)。ダウンロードしたファイルはインストール後に削除してよい。
+
+### ソースから
+
 ```console
 $ git clone https://github.com/mjun0812/yobirin.git
 $ cd yobirin
-$ bash scripts/install.sh
+$ swift build -c release
+$ .build/release/yobirin install
 ```
 
-インストーラはユニバーサルバイナリをビルドし、ad-hoc署名した `Yobirin.app` を `~/Applications` へ配置して、コマンドを `~/.local/bin/yobirin` へsymlinkする (`~/.local/bin` をPATHに通すか、`YOBIRIN_BIN_DIR` で配置先を変更する)。
-
-ビルドを省きたい場合は、リリースのビルド済みユニバーサルバイナリを取得できる (privateリポジトリの間は [gh CLI](https://cli.github.com/) が必要):
-
-```console
-$ YOBIRIN_FROM_RELEASE=1 bash scripts/install.sh
-```
-
-リリースから取得するのはMach-Oバイナリだけで、バンドル組み立て・アイコン焼き込み・ad-hoc署名はローカルで行う。そのためカスタムアイコンやプロファイルはそのまま使える。`YOBIRIN_RELEASE_TAG=v0.1.0` で特定のリリースに固定できる。
-
-再実行すればそのままアップグレードになる。
+`yobirin install` を再実行すればそのままアップグレードになる。
 旧バンドルを削除してから新バンドルを配置するため、macOSに登録されるコピーは常に1つに保たれる。
 
 ## 通知の許可
@@ -114,11 +119,15 @@ esac
 用途別にアイコンを使い分けたい場合は、アイコンとBundle IDだけが異なる派生バンドルをインストールする:
 
 ```console
-$ bash scripts/install.sh claude codex
+$ yobirin install --profile claude --icon assets/icon/claude.png
+$ yobirin --profile claude --title "Claude" --message "完了"
 ```
 
-これで `Yobirin-Claude.app` と `Yobirin-Codex.app` が `assets/icon/<name>.png` のアイコンで配置され、コマンド `yobirin-claude` と `yobirin-codex` が作られる。
+これで `Yobirin-Claude.app` (Bundle ID `com.mjun0812.yobirin.claude`) が指定アイコンで配置される。
+通知側の `--profile <name>` が実行を対象バンドルへ引き継ぐため、プロファイルを増やしてもPATH上のコマンドは `yobirin` 1本のまま増えない。
 各プロファイルは初回に独立して通知許可を求め、システム設定にも別項目として並ぶため、プロファイル単位でオンオフできる。
+
+プロファイル名に使えるのは英小文字と数字のみ (`^[a-z0-9]+$`)。`--icon` を省略すると同梱の標準アイコン (鈴) が使われる。
 
 ## 既知の制限
 
@@ -140,10 +149,10 @@ $ rm -f ~/.local/bin/yobirin*
 $ mise install            # mise.tomlにpinした開発ツールの導入 (prek, shfmt, shellcheck, oxfmt)
 $ prek install            # pre-commit hookの有効化 (swift format / shfmt / shellcheck / oxfmt)
 $ swift test              # ユニットテストと結合テスト (通知センターはモック)
-$ bash scripts/build-app.sh [profile]   # 署名済み.appバンドルのビルド
+$ swift build -c release && .build/release/yobirin install   # ビルドしてローカルへインストール
 ```
 
-開発ツールは [mise](https://mise.jdx.dev/) で管理する。CI (GitHub Actions) は `main` へのpushとpull requestで、ビルド、テスト、lint (swift format / shellcheck / shfmt / oxfmt) を実行し、ツールは `mise.toml` と同じバージョンを使う。
+開発ツールは [mise](https://mise.jdx.dev/) で管理する。CI (GitHub Actions) は `main` へのpushとpull requestで、ビルド、テスト、lint (swift format / oxfmt) を実行し、ツールは `mise.toml` と同じバージョンを使う。
 
 通知の表示、対話、許可フローはGUIに依存するため自動テストでは検証できない。
 specと手動検証チェックリストは `.kiro/specs/yobirin-cli/` に、設計の経緯と実測記録は `docs/design-research.md` にある。

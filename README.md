@@ -24,23 +24,28 @@ yobirin uses the current `UserNotifications` framework only. Dismissal is detect
 
 ## Install
 
+### From a release binary (no toolchain required)
+
+Download the prebuilt universal binary and let it install itself (requires the [gh CLI](https://cli.github.com/) while the repository is private):
+
+```console
+$ gh release download --repo mjun0812/yobirin --pattern yobirin-universal
+$ chmod +x yobirin-universal
+$ ./yobirin-universal install
+```
+
+The binary copies itself into an ad-hoc signed `Yobirin.app`, places it into `~/Applications`, and symlinks the command into `~/.local/bin/yobirin` (make sure `~/.local/bin` is on your `PATH`, or set `YOBIRIN_BIN_DIR` to another directory). The downloaded file can be deleted afterwards.
+
+### From source
+
 ```console
 $ git clone https://github.com/mjun0812/yobirin.git
 $ cd yobirin
-$ bash scripts/install.sh
+$ swift build -c release
+$ .build/release/yobirin install
 ```
 
-The installer builds a universal binary, assembles an ad-hoc signed `Yobirin.app`, places it into `~/Applications`, and symlinks the command into `~/.local/bin/yobirin` (make sure `~/.local/bin` is on your `PATH`, or set `YOBIRIN_BIN_DIR` to another directory).
-
-To skip compilation, download the prebuilt universal binary from a release instead (requires the [gh CLI](https://cli.github.com/) while the repository is private):
-
-```console
-$ YOBIRIN_FROM_RELEASE=1 bash scripts/install.sh
-```
-
-Only the Mach-O binary comes from the release; the bundle, icon, and ad-hoc signature are still produced locally, so custom icons and profiles keep working. Set `YOBIRIN_RELEASE_TAG=v0.1.0` to pin a specific release.
-
-Re-running the installer upgrades in place. The old bundle is removed before the new one is installed, so only one copy is ever registered with macOS.
+Re-running `yobirin install` upgrades in place. The old bundle is removed before the new one is installed, so only one copy is ever registered with macOS.
 
 ## Notification permission
 
@@ -107,10 +112,13 @@ On timeout, the delivered notification is removed from Notification Center befor
 The notification icon is fixed to the app bundle's icon (a macOS restriction; there is no per-notification icon option). To use different icons per purpose, install derivative bundles that differ only in icon and bundle ID:
 
 ```console
-$ bash scripts/install.sh claude codex
+$ yobirin install --profile claude --icon assets/icon/claude.png
+$ yobirin --profile claude --title "Claude" --message "Done"
 ```
 
-This installs `Yobirin-Claude.app` and `Yobirin-Codex.app` with icons taken from `assets/icon/<name>.png`, and creates the commands `yobirin-claude` and `yobirin-codex`. Each profile asks for notification permission on its own first run and appears as a separate entry in System Settings, so each can be toggled independently.
+This installs `Yobirin-Claude.app` (bundle ID `com.mjun0812.yobirin.claude`) with the given icon. On the notify side, `--profile <name>` dispatches execution to that bundle, so `PATH` keeps a single `yobirin` command no matter how many profiles you add. Each profile asks for notification permission on its own first run and appears as a separate entry in System Settings, so each can be toggled independently.
+
+Profile names must match `^[a-z0-9]+$`. Omitting `--icon` installs the bundled default bell icon.
 
 ## Known limitations
 
@@ -132,10 +140,10 @@ $ rm -f ~/.local/bin/yobirin*
 $ mise install            # install dev tools pinned in mise.toml (prek, shfmt, shellcheck, oxfmt)
 $ prek install            # enable pre-commit hooks (swift format / shfmt / shellcheck / oxfmt)
 $ swift test              # unit and integration tests (mocked notification center)
-$ bash scripts/build-app.sh [profile]   # build the signed .app bundle
+$ swift build -c release && .build/release/yobirin install   # build and install locally
 ```
 
-Dev tools are managed with [mise](https://mise.jdx.dev/). CI (GitHub Actions) runs build, tests, and lint checks (swift format / shellcheck / shfmt / oxfmt) on every push to `main` and on pull requests, installing the same tool versions via `mise.toml`.
+Dev tools are managed with [mise](https://mise.jdx.dev/). CI (GitHub Actions) runs build, tests, and lint checks (swift format / oxfmt) on every push to `main` and on pull requests, installing the same tool versions via `mise.toml`.
 
 Notification display, interaction, and the permission flow are GUI-dependent and cannot be covered by automated tests; see `.kiro/specs/yobirin-cli/` for the spec and the manual verification checklist. Design rationale and the field measurements behind the architecture live in `docs/design-research.md` (Japanese).
 

@@ -456,7 +456,8 @@ Homebrew formulaについては、**許可取得後なら `/opt/homebrew/Cellar/
 3. ~~**M2b (MVP)**~~ **完了 (2026-07-27)**: kiro spec `yobirin-cli` (`.kiro/specs/yobirin-cli/`) として全14タスクを実装・検証済み (最終検証GO)。alerter同等のフル機能 + JSON出力 + アイコンプロファイル機構 (派生バンドル + symlink方式)。手動検証で孤児通知掃除のバグを発見・修正した (実装ノート参照)。アプリアイコン (神社の鈴 + 鈴緒 + 青海波) も適用済み
 4. ~~**M4a (private公開)**~~ **完了 (2026-07-27)**: README日英2言語 (通知許可ダイアログの説明、既知の制限を含む) とMITライセンスを整備し、[github.com/mjun0812/yobirin](https://github.com/mjun0812/yobirin) へprivateでpush済み。dotfilesからのインストールをGitHub経由 (clone + `scripts/install.sh`) にするため、M3より先行した (2026-07-27にM3と順序を入れ替え。リポジトリは当初から独立して作られているため「リポジトリ分離」は不要になった)
 5. **M3 (差し替え完了、放置テスト継続中)**: dotfilesのhook (`notify.sh` → `yobirin-wezterm-notify.sh`) をyobirinへ差し替え済み (2026-07-27、dotfiles commit `067191a`)。アイコンの出し分けはalerterの私用API `--app-icon` を捨て、プロファイル派生バンドル (`yobirin-claude` / `yobirin-codex`) で実現した。`notify.sh` の第4引数はPNGパスからプロファイル名へ変更。Claude/Codex両hook経路で通知配信とクリック→WezTerm pane活性化を実機確認済み。**残り: 実運用でのメモリ・CPUの長期観測**
-6. **M4b (public化)**: 実運用で安定を確認後にvisibilityをpublicへ変更。必要ならHomebrew tap (この段階でDeveloper ID署名 + notarizationを再検討)
+6. ~~**M2c (CLI内蔵インストーラ)**~~ **完了 (2026-07-28)**: kiro spec `yobirin-cli` の拡張 (Requirements 11〜13、tasks 6〜9) として実装・検証済み (最終検証GO)。バンドル組み立て・icns生成・署名・配置・検証を `yobirin install` サブコマンドへ内蔵し、`scripts/build-app.sh` / `install.sh` を廃止。リリースの素バイナリ1つで `install` → 通知まで完走する。プロファイル選択は per-profileコマンド (`yobirin-claude` 等) から単一コマンドの `--profile <name>` ディスパッチへ変更。**dotfiles連携はこの新方式 (`yobirin install --profile <name> --icon <path>` + `--profile` 呼び出し) への追従が必要**。検証中にsymlink経由起動の誤判定リグレッションを発見・修正した (CFBundleがsymlinkを解決しない問題。実体パスへの再execで正規化)
+7. **M4b (public化)**: 実運用で安定を確認後にvisibilityをpublicへ変更。必要ならHomebrew tap (この段階でDeveloper ID署名 + notarizationを再検討)
 
 ## 未決事項 (詰めるポイント)
 
