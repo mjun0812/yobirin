@@ -12,8 +12,9 @@ yobirin (呼び鈴) は、macOSで通知を1件配信し、ユーザーの反応
 
 ## Boundary Context
 
-- **In scope**: yobirin CLI本体 (通知送信・応答捕捉・結果JSON出力・終了コード)、`.app` バンドルのビルドスクリプト、インストール構成 (`~/Applications` 配置 + PATH上のsymlink)、アイコンプロファイル (派生バンドル)
+- **In scope**: yobirin CLI本体 (通知送信・応答捕捉・結果JSON出力・終了コード)、CLI自身によるバンドル組み立てとインストール (`~/Applications` 配置 + PATH上のsymlink)、アイコンプロファイル (派生バンドル)、実行ファイルのビルドパイプライン、ビルド済みバイナリの配布
 - **Out of scope**: alerterとのCLI・JSON出力互換、通知ごとの任意アイコン指定 (`--icon`)、他アプリへのなりすまし・私用API利用、Linux / Windows対応、常駐デーモン化、Homebrew formula化・Developer ID署名・公証 (OSS化フェーズM4)、dotfiles側 (notify.sh / hookスクリプト) の書き換え
+- **Adjacent expectations**: インストールには Xcode Command Line Tools の `codesign` が利用可能であることを前提とする。ビルド済みバイナリの取得元 (GitHub Release) が非公開である間は、利用者が `gh` CLI で認証済みであることを前提とする
 - **Adjacent expectations**: dotfilesの通知ルーター notify.sh がバックエンドとして本CLIを呼び出す。hook側は `jq -r '.result'` で分岐するよう別途書き換える (本specの外)
 
 ## Requirements
@@ -103,7 +104,7 @@ yobirin (呼び鈴) は、macOSで通知を1件配信し、ユーザーの反応
 
 #### Acceptance Criteria
 
-1. yobirin の実体は `.app` バンドル内のMach-Oでなければならない (素のMach-Oでは `UNUserNotificationCenter.current()` が `bundleProxyForCurrentProcess is nil` で例外死する)
+1. 通知を配信するとき、yobirin は `.app` バンドル内のMach-Oとして実行されていなければならない (素のMach-Oでは通知APIが利用できない。バンドル外で実行された場合の振る舞いは Requirement 12 が定める)
 2. バンドルの `Info.plist` には `CFBundleIdentifier` (デフォルト: `com.mjun0812.yobirin`) と `LSUIElement = true` (Dock非表示) を設定しなければならない
 3. PATH上のsymlinkからバンドル内Mach-Oを直接実行でき、結果JSONが呼び出し元プロセスのstdoutへ返らなければならない (ラッパー・IPC・`open` 経由起動は使わない)
 4. インストール時、バンドルは `~/Applications` 等の正規の場所へ配置しなければならない (初回の通知許可ダイアログが表示される唯一の条件。`/private/tmp` 等ではダイアログが出ない)
@@ -112,13 +113,13 @@ yobirin (呼び鈴) は、macOSで通知を1件配信し、ユーザーの反応
 
 ### Requirement 9: ビルドパイプライン
 
-**Objective:** 開発者として、Xcodeプロジェクトなしで再現可能に `.app` バンドルをビルドしたい。
+**Objective:** 開発者として、Xcodeプロジェクトなしで再現可能に実行ファイルと `.app` バンドルをビルドしたい。
 
 #### Acceptance Criteria
 
-1. yobirin はSwift Package (executableTarget) とシェルスクリプトでバンドルを組み立てなければならず、Xcodeプロジェクトを使ってはならない
-2. ビルドスクリプトは、arm64 / x86_64 の個別ビルド → `lipo` によるユニバーサル化 → バンドル組み立て → `sips` + `iconutil` によるicns生成 → ad-hoc署名、の手順で `.app` を生成しなければならない
-3. 署名後、ビルドスクリプトは `open -W -n <app> --args ...` によるLaunchServices起動スモークテストを実行しなければならない (署名ミスをビルド時に検出する)
+1. ビルドパイプラインはSwift Package (executableTarget) で実行ファイルを生成しなければならず、Xcodeプロジェクトを使ってはならない
+2. リリース用のビルドは、Apple SiliconとIntelの双方で動作する単一の実行ファイルを生成しなければならない
+3. バンドルの組み立て・アイコン焼き込み・署名・配置は、Requirement 11 のインストール機構だけが担わなければならない (バンドル組み立ての実装を複数箇所に持たない)
 4. ad-hoc署名のバンドルに制限付きentitlementを付与してはならない (付与するとアプリが起動不能になる)
 
 ### Requirement 10: アイコンプロファイル
@@ -127,6 +128,44 @@ yobirin (呼び鈴) は、macOSで通知を1件配信し、ユーザーの反応
 
 #### Acceptance Criteria
 
-1. yobirin は、アイコンとBundle IDのみが異なる派生バンドル (プロファイル。例: `Yobirin-Claude.app` = `com.mjun0812.yobirin.claude`) を複数ビルド・配置できなければならない
+1. yobirin は、アイコンとBundle IDのみが異なる派生バンドル (プロファイル。例: `Yobirin-Claude.app` = `com.mjun0812.yobirin.claude`) を複数配置できなければならない
 2. プロファイルが選択されたとき、対象プロファイルのバンドル内Mach-Oが実行され、そのバンドルのアイコンと名義で通知が配信されなければならない
 3. 通知許可はプロファイルごとに独立して取得され、システム設定上もプロファイルごとに独立して制御できなければならない
+4. プロファイルの選択は単一の `yobirin` コマンドの引数で行わなければならず、プロファイルを追加しても利用者のPATHに新たなコマンドを増やしてはならない
+5. If 選択されたプロファイルがインストールされていない場合、yobirin はJSONを出力せず、理由をstderrへ出力して非0の終了コードで終了しなければならない (Requirement 7.3 の環境エラー規約に従う)
+
+### Requirement 11: CLIによるインストール
+
+**Objective:** 利用者として、リポジトリを取得したりビルドしたりせずに、コマンド1つでyobirinとそのプロファイルを導入したい。
+
+#### Acceptance Criteria
+
+1. yobirin はインストール用のサブコマンドを提供し、実行された環境にデフォルトバンドルとプロファイルバンドルの双方を導入できなければならない
+2. インストールのサブコマンドが実行されたとき、yobirin は自身の実行中バイナリを実体としてバンドルを組み立てなければならない (ビルドツールチェーンを必要としない)
+3. インストールのサブコマンドがアイコン画像のパスを受け取ったとき、yobirin はそのアイコンをバンドルへ焼き込まなければならない
+4. If アイコンが指定されなかった場合、yobirin は実行ファイルに同梱された標準アイコン (鈴) をバンドルへ焼き込まなければならない (リポジトリや外部ファイルの存在に依存しない)
+5. インストールの成果物は、Requirement 8 が定める配置 (`~/Applications` へのバンドル配置、PATH上のsymlink、旧バンドルの削除) と Requirement 10 が定めるプロファイル規約を満たさなければならない
+6. インストールのサブコマンドは、生成したバンドルへad-hoc署名を行い、署名が失敗したときは非0の終了コードで終了しなければならない
+7. インストール先や生成物に、Requirement 9.4 が禁じる制限付きentitlementを付与してはならない
+8. 既存の通知送信のコマンド形態 (`yobirin --title <str> --message <str> ...`) は、サブコマンド導入後も従来どおり動作しなければならない
+9. インストール完了時、yobirin は配置したバンドルが起動可能であることを検証し、検証に失敗したときは非0の終了コードで終了しなければならない (署名ミスをインストール時に検出する)
+
+### Requirement 12: バンドル外実行時の安全な振る舞い
+
+**Objective:** 配布されたバイナリを初めて触る利用者として、インストール前に実行してしまってもクラッシュせず、次にすべきことを知りたい。
+
+#### Acceptance Criteria
+
+1. While yobirin が `.app` バンドル外のバイナリとして実行されている場合、インストール用のサブコマンドは通知機能に依存せずに完了しなければならない
+2. If yobirin が `.app` バンドル外で通知の送信を要求された場合、yobirin は異常終了せず、インストールが必要である旨をstderrへ出力して非0の終了コードで終了しなければならない
+3. If yobirin が `.app` バンドル外で引数なしに起動された場合、yobirin は異常終了せず、インストールの案内をstderrへ出力して終了しなければならない (現状は例外により異常終了し、クラッシュレポートが生成される)
+
+### Requirement 13: ビルド済みバイナリの配布
+
+**Objective:** 利用者として、ビルドの待ち時間なしにyobirinを導入・更新したい。
+
+#### Acceptance Criteria
+
+1. リリースが公開されたとき、そのリリースにはmacOSのApple SiliconとIntelの双方で動作する単一の実行ファイルが添付されていなければならない
+2. 利用者が公開されたリリースの実行ファイルを取得して実行したとき、Requirement 11 のインストールがビルドツールチェーンなしで完了しなければならない
+3. 配布される実行ファイルは、公開時点のソースから生成され、テストに合格したものでなければならない

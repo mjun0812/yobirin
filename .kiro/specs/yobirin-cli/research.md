@@ -78,6 +78,20 @@ Swiftプロトタイプ (約180行 + `.app` バンドル + ad-hoc署名) での�
 - **遅延exitは必要**: 即exit (`exit-delay 0`) するとmacOSがアプリを再起動し、引数なしの新プロセスがデフォルト値のまま通知を1件出した (実測)。`exit-delay 1` で解消。さらに再起動されたのは同一Bundle IDで登録済みの**別の場所のコピー**だった → 同一Bundle IDのバンドルを複数箇所に登録してはならない
 - **権限フロー**: 許可ダイアログ表示中は `requestAuthorization` が応答を待ち `--timeout` は進まない (`--timeout 5` で48秒待った実測)。拒否は `granted == false` ではなく `UNErrorDomain Code=1` のエラーで返り未許可状態と区別できない → error分岐・`granted == false` 分岐の両方で exit 2 (実測で終了コード2を確認済み)
 
+### CLIインストールとバンドル外実行の実測 (2026-07-27)
+
+- **Context**: 「リリースのバイナリを落として `yobirin install` を叩くだけ」の成立可否を確認するため、素のMach-O (バンドル外) での挙動を実測した
+- **Findings**:
+  - 引数なし起動は `UNUserNotificationCenter.current()` への到達で **SIGABRT (exit 134)**。`~/Library/Logs/DiagnosticReports` にクラッシュログが残る。真因は `UNNotificationCenterAdapter` の格納プロパティ `center` が非lazyでinit時に即評価されること
+  - `--help` は exit 0 で正常動作。ArgumentParserは**マッチした葉コマンドの `run()` だけ**を呼ぶため、通知APIに触れないサブコマンドはバンドル外でも安全
+  - 素のMach-Oから `Process` で `codesign --force --sign -` を起動してのad-hoc署名は成功する
+  - ImageIOの `CGImageDestination` (UTType `com.apple.icns`) でicns生成が可能。ただし**各画像にDPIメタデータ (1x=72 / 2x=144) を付与しないとRetinaスロットが暗黙に捨てられ5サイズに劣化**する。付与すれば10スロットすべてが正しく生成されることを `iconutil -c iconset` での復元で確認済み
+- **Implications**: インストール系サブコマンドは通知APIに触れない構造にすれば素のバイナリで完走できる。バンドル外検知を起動フローの最初に置き、通知系だけを遮断する
+
+### 参考: ライト/ダーク別アイコンの調査 (2026-07-27)
+
+- 通知バナーの白合成問題への対案としてライト/ダーク別バリアント (`.icon` 形式) を調査したが、**解決しない**ことを実測で確定 (詳細はImplementation Notes)。アイコン外観はダークモードではなく独立したグローバル設定に連動し、Apple純正アプリすらアピアランスで分岐しない (差分ピクセル0)。黒背景焼き込みが正解
+
 ### 検証しなかった手段とその理由
 
 | 手段                                     | 未検証の理由                                                                |
@@ -124,6 +138,29 @@ Swiftプロトタイプ (約180行 + `.app` バンドル + ad-hoc署名) での�
 - **Context**: 即exitでmacOSがアプリを再起動して余計な通知を出す。SIGKILL後の孤児通知クリックでも空起動される (実測)
 - **Selected Approach**: 結果出力後0.5〜1秒の遅延exit。引数なし起動は孤児通知を掃除して即exit。timeout時は通知を削除してから終了 (alerter準拠のライフサイクル)
 - **Rationale**: 3つの防御で「exit後の通知クリックで再起動 → 誤通知」の経路をすべて塞ぐ
+
+### Decision: プロファイル選択は単一コマンドの `--profile` ディスパッチへ変更 (2026-07-27、当初決定を改訂)
+
+- **Context**: CLI自身がインストールを担う設計 (Requirement 11) の導入で、プロファイルごとにsymlinkコマンドが増殖する懸念が顕在化した
+- **Alternatives Considered**:
+  1. プロファイルごとのsymlink (当初決定) — 透明だがプロファイル数だけコマンドが増える
+  2. `--profile <name>` で対象バンドルのMach-Oへexecする薄いディスパッチ
+- **Selected Approach**: 案2。PATHのコマンドは `yobirin` 1本、プロファイルはAppだけが増える
+- **Rationale**: 当初案2を棄却した理由は「Swift側が他バンドルの配置パスへ結合する」ことだったが、インストーラを内蔵した時点でCLIは配置規約を知っている。棄却理由が消滅したため再決定した
+- **Trade-offs**: exec 1回分のオーバーヘッド (数ms) とディスパッチ実装の追加。呼び出し側 (dotfiles) は名前解決ロジックが不要になり単純化する
+
+### Decision: バンドル組み立てはCLIに一元化し、シェルスクリプト2本を削除 (2026-07-27)
+
+- **Context**: `install` サブコマンドがバンドルを組み立てられるなら、`build-app.sh` の組み立て部分と完全に重複する。リリースCIは既に `swift build` + `lipo` を直接呼んでいる
+- **Selected Approach**: `build-app.sh` と `install.sh` を削除。CIは実行ファイル生成まで、バンドル組み立て・アイコン・署名・配置はCLIの `install` だけが担う (Requirement 9.3)
+- **Build vs Adopt**: icns生成はImageIO (プラットフォーム内蔵、実測済み) を採用し `sips`/`iconutil` の外部起動を廃止。署名はAPIが存在しないため外部 `codesign` の起動を継続
+- **Trade-offs**: ローカルで `.app` だけ欲しい場合も `swift build && .build/release/yobirin install` を使う (専用スクリプトはない)
+
+### Decision: デフォルトアイコンは実行ファイルに埋め込む (2026-07-27)
+
+- **Context**: 素のバイナリだけではリポジトリの `assets/icon/AppIcon.png` が手元にない (Requirement 11.4)
+- **Selected Approach**: 標準アイコンのPNGバイト列を生成済みSwiftソースとしてコミットし、バイナリに同梱する。SPMのリソースバンドルは実行ファイル単体配布では使えない (バンドル外に置かれる) ため採用しない
+- **Follow-up**: アイコン変更時は生成ファイルの再生成が必要 (手順をコメントで残す)
 
 ### 確定済みの論点一覧 (2026-07-26)
 
