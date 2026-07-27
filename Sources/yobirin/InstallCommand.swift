@@ -14,7 +14,8 @@ struct InstallCommand: ParsableCommand {
     )
 
     /// `Installer.install` 呼び出しを差し替え可能にする関数型 (テスト容易性のための注入点)。
-    typealias InstallFunction = (_ profile: String?, _ iconPath: String?) throws -> Void
+    typealias InstallFunction = (_ profile: String?, _ iconPath: String?) throws ->
+        Installer.InstallOutcome
 
     @Option(help: "導入するプロファイル名 (英小文字・数字のみ。省略時はデフォルト)")
     var profile: String?
@@ -27,18 +28,20 @@ struct InstallCommand: ParsableCommand {
             profile: profile,
             icon: icon,
             install: Self.defaultInstall,
+            stdoutWriter: Self.defaultStdoutWriter,
             stderrWriter: Self.defaultStderrWriter,
             exit: { Darwin.exit($0) }
         )
     }
 
     /// プロファイル名の検証 (`ProfileNaming` の規約) → `Installer.install` 呼び出し → 成否の
-    /// メッセージ化・終了コード決定 (design.md Error Handling)。`install` / `stderrWriter` /
-    /// `exit` を注入してテストする。
+    /// メッセージ化・終了コード決定 (design.md Error Handling)。`install` / `stdoutWriter` /
+    /// `stderrWriter` / `exit` を注入してテストする。
     static func perform(
         profile: String?,
         icon: String?,
         install: InstallFunction,
+        stdoutWriter: (String) -> Void,
         stderrWriter: (String) -> Void,
         exit: (Int32) -> Void
     ) {
@@ -53,8 +56,9 @@ struct InstallCommand: ParsableCommand {
             }
         }
 
+        let outcome: Installer.InstallOutcome
         do {
-            try install(profile, icon)
+            outcome = try install(profile, icon)
         } catch let error as Installer.InstallError {
             stderrWriter(error.errorDescription ?? "インストールに失敗しました")
             exit(ResultEmitter.environmentErrorExitCode)
@@ -66,14 +70,28 @@ struct InstallCommand: ParsableCommand {
         }
 
         if let naming = try? ProfileNaming.resolve(profile: profile) {
-            print("インストールが完了しました: \(naming.bundlePath)")
+            stdoutWriter("インストールが完了しました: \(naming.bundlePath)")
         } else {
-            print("インストールが完了しました")
+            stdoutWriter("インストールが完了しました")
+        }
+
+        // アイコン変更時の反映遅延の案内 (Requirement 16): 既存バンドルを置き換え、かつ
+        // アイコンが変化したときだけ出す。案内の有無は成否・終了コードに影響しない (16.5)。
+        if outcome.replacedExistingBundle && outcome.iconChanged {
+            stdoutWriter(
+                "アイコンの変更を通知バナーへ反映するにはログアウト→ログインが必要です (新しいプロファイル名でインストールした場合は即時反映されます)"
+            )
         }
     }
 
-    private static func defaultInstall(profile: String?, iconPath: String?) throws {
+    private static func defaultInstall(profile: String?, iconPath: String?) throws
+        -> Installer.InstallOutcome
+    {
         try Installer.install(profile: profile, iconPath: iconPath)
+    }
+
+    private static func defaultStdoutWriter(_ text: String) {
+        print(text)
     }
 
     private static func defaultStderrWriter(_ message: String) {

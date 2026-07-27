@@ -42,7 +42,11 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: "ABC",
             icon: nil,
-            install: { profile, icon in installCalls.append((profile, icon)) },
+            install: { profile, icon in
+                installCalls.append((profile, icon))
+                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { stderrMessages.append($0) },
             exit: { exitCodes.append($0) }
         )
@@ -60,7 +64,11 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: "a-b",
             icon: nil,
-            install: { profile, icon in installCalls.append((profile, icon)) },
+            install: { profile, icon in
+                installCalls.append((profile, icon))
+                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { _ in },
             exit: { exitCodes.append($0) }
         )
@@ -76,7 +84,11 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: nil,
             icon: nil,
-            install: { profile, icon in installCalls.append((profile, icon)) },
+            install: { profile, icon in
+                installCalls.append((profile, icon))
+                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { _ in },
             exit: { exitCodes.append($0) }
         )
@@ -93,7 +105,11 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: "claude",
             icon: "/tmp/icon.png",
-            install: { profile, icon in installCalls.append((profile, icon)) },
+            install: { profile, icon in
+                installCalls.append((profile, icon))
+                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { _ in },
             exit: { _ in }
         )
@@ -109,7 +125,11 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: nil,
             icon: nil,
-            install: { profile, icon in installCalls.append((profile, icon)) },
+            install: { profile, icon in
+                installCalls.append((profile, icon))
+                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { _ in },
             exit: { _ in }
         )
@@ -132,6 +152,7 @@ final class InstallCommandTests: XCTestCase {
             install: { _, _ in
                 throw Installer.InstallError.iconUnreadable(path: missingIconPath)
             },
+            stdoutWriter: { _ in },
             stderrWriter: { stderrMessages.append($0) },
             exit: { exitCodes.append($0) }
         )
@@ -148,11 +169,110 @@ final class InstallCommandTests: XCTestCase {
         InstallCommand.perform(
             profile: nil,
             icon: nil,
-            install: { _, _ in },
+            install: { _, _ in
+                Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { _ in },
             stderrWriter: { stderrMessages.append($0) },
             exit: { exitCodes.append($0) }
         )
 
+        XCTAssertTrue(stderrMessages.isEmpty)
+        XCTAssertTrue(exitCodes.isEmpty)
+    }
+
+    // MARK: - アイコン変更時の反映遅延の案内 (Requirement 16)
+
+    func testPerformDoesNotShowGuidanceForFreshInstall() {
+        var stdoutMessages: [String] = []
+        var stderrMessages: [String] = []
+        var exitCodes: [Int32] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { stderrMessages.append($0) },
+            exit: { exitCodes.append($0) }
+        )
+
+        XCTAssertEqual(stdoutMessages.count, 1)
+        XCTAssertFalse(stdoutMessages.contains { $0.contains("ログアウト") })
+        XCTAssertTrue(stderrMessages.isEmpty)
+        XCTAssertTrue(exitCodes.isEmpty)
+    }
+
+    func testPerformDoesNotShowGuidanceWhenReplacedBundleWithUnchangedIcon() {
+        var stdoutMessages: [String] = []
+        var stderrMessages: [String] = []
+        var exitCodes: [Int32] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: false)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { stderrMessages.append($0) },
+            exit: { exitCodes.append($0) }
+        )
+
+        XCTAssertEqual(stdoutMessages.count, 1)
+        XCTAssertFalse(stdoutMessages.contains { $0.contains("ログアウト") })
+        XCTAssertTrue(stderrMessages.isEmpty)
+        XCTAssertTrue(exitCodes.isEmpty)
+    }
+
+    func testPerformShowsGuidanceWhenReplacedBundleWithChangedIcon() {
+        var stdoutMessages: [String] = []
+        var stderrMessages: [String] = []
+        var exitCodes: [Int32] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: true)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { stderrMessages.append($0) },
+            exit: { exitCodes.append($0) }
+        )
+
+        // 16.1: 案内は完了メッセージに続けて (順序どおりに) 出ること。
+        XCTAssertEqual(stdoutMessages.count, 2)
+        XCTAssertTrue(stdoutMessages[0].contains("インストールが完了しました"))
+        XCTAssertTrue(stdoutMessages[1].contains("ログアウト"))
+        XCTAssertTrue(stderrMessages.isEmpty)
+        XCTAssertTrue(exitCodes.isEmpty)
+    }
+
+    func testPerformShowsGuidanceWhenOldIconUnreadableIsTreatedAsChanged() {
+        // Installerは旧icnsが読み取れない場合もiconChanged=trueとして返す (16.4)。
+        // InstallCommandはその結果をそのまま案内表示の判定に使うだけでよい。
+        var stdoutMessages: [String] = []
+        var stderrMessages: [String] = []
+        var exitCodes: [Int32] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: true)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { stderrMessages.append($0) },
+            exit: { exitCodes.append($0) }
+        )
+
+        // 16.1: 案内は完了メッセージに続けて (順序どおりに) 出ること。
+        XCTAssertEqual(stdoutMessages.count, 2)
+        XCTAssertTrue(stdoutMessages[0].contains("インストールが完了しました"))
+        XCTAssertTrue(stdoutMessages[1].contains("ログアウト"))
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
     }

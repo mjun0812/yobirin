@@ -442,6 +442,104 @@ final class InstallerTests: XCTestCase {
         XCTAssertTrue(calls.contains { $0.0 == machOPath && $0.1 == ["--help"] })
     }
 
+    // MARK: - アイコン変化の検出 (Requirement 16)
+
+    func testInstallReturnsNotReplacedForFreshInstall() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        XCTAssertFalse(outcome.replacedExistingBundle)
+        XCTAssertFalse(outcome.iconChanged)
+    }
+
+    func testInstallReturnsReplacedWithIconUnchangedWhenSameIconReinstalled() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        let iconPath = tempRoot.appendingPathComponent("same-icon.png").path
+        FileManager.default.createFile(atPath: iconPath, contents: makeTestPNGData())
+
+        _ = try Installer.install(
+            profile: nil,
+            iconPath: iconPath,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: iconPath,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        XCTAssertTrue(outcome.replacedExistingBundle)
+        XCTAssertFalse(outcome.iconChanged)
+    }
+
+    func testInstallReturnsReplacedWithIconChangedWhenDifferentIconReinstalled() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        _ = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        let differentIconPath = tempRoot.appendingPathComponent("different-icon.png").path
+        FileManager.default.createFile(atPath: differentIconPath, contents: makeTestPNGData())
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: differentIconPath,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        XCTAssertTrue(outcome.replacedExistingBundle)
+        XCTAssertTrue(outcome.iconChanged)
+    }
+
+    func testInstallReturnsIconChangedWhenOldIconUnreadable() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        // 旧バンドルはあるがAppIcon.icnsがない = 旧アイコンが読み取れない状態を再現する (16.4)。
+        let bundlePath = "\(homeDirectory)/Applications/Yobirin.app"
+        try FileManager.default.createDirectory(
+            atPath: "\(bundlePath)/Contents/Resources", withIntermediateDirectories: true)
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess
+        )
+
+        XCTAssertTrue(outcome.replacedExistingBundle)
+        XCTAssertTrue(outcome.iconChanged)
+    }
+
     // MARK: - BIN_DIR環境変数 (design.md Install layout)
 
     func testInstallUsesBinDirectoryEnvironmentVariableWhenNotExplicitlyProvided() throws {

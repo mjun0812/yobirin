@@ -54,6 +54,15 @@ enum Installer {
     /// PATH上のsymlink先ディレクトリを指定する環境変数名 (旧 `scripts/install.sh` を踏襲)。
     static let binDirectoryEnvironmentKey = "YOBIRIN_BIN_DIR"
 
+    /// `install` の結果 (design.md「アイコン変化の検出 (Requirement 16)」)。
+    /// 案内表示の要否はInstallCommandが判定するため、成否・終了コードには影響しない (16.5)。
+    struct InstallOutcome: Equatable {
+        /// 配置先に既存バンドルがあり、それを削除して置き換えたか。
+        let replacedExistingBundle: Bool
+        /// 新旧icnsのバイト内容が異なるか (旧icnsが読み取れない場合はtrue — 16.4の安全側)。
+        let iconChanged: Bool
+    }
+
     /// バンドルの組み立て・署名・配置・起動検証を行う (design.md インストールの処理順1〜6)。
     ///
     /// `profile` が非nilのときはPATH上のsymlink張り替えを行わない (プロファイルバンドルの
@@ -68,7 +77,7 @@ enum Installer {
         resolveSelfExecutablePath: () -> String? = Self.defaultResolveSelfExecutablePath,
         defaultIconData: () -> Data = { DefaultIcon.pngData },
         runProcess: ProcessRunner = Self.defaultRunProcess
-    ) throws {
+    ) throws -> InstallOutcome {
         let naming = try ProfileNaming.resolve(profile: profile, homeDirectory: homeDirectory)
         let resolvedBinDirectory =
             binDirectory
@@ -120,8 +129,8 @@ enum Installer {
         } else {
             iconData = defaultIconData()
         }
-        try IcnsWriter.write(
-            pngData: iconData, to: resourcesDir.appendingPathComponent("AppIcon.icns").path)
+        let newIconPath = resourcesDir.appendingPathComponent("AppIcon.icns").path
+        try IcnsWriter.write(pngData: iconData, to: newIconPath)
 
         // 4. 外部codesignでad-hoc署名する (entitlementは一切付与しない)。失敗は非0。
         let signExitCode = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", appDir.path])
@@ -139,7 +148,23 @@ enum Installer {
         let applicationsDirectory = "\(homeDirectory)/Applications"
         try fileManager.createDirectory(
             atPath: applicationsDirectory, withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: naming.bundlePath) {
+
+        // アイコン変化の検出 (Requirement 16): 旧バンドル削除の前に既存icnsを読み、新icnsとバイト
+        // 比較する。旧icnsが読み取れない場合は変化した可能性がある以上、変化扱いとする (16.4)。
+        let bundleExisted = fileManager.fileExists(atPath: naming.bundlePath)
+        let iconChanged: Bool
+        if bundleExisted {
+            let oldIconPath = "\(naming.bundlePath)/Contents/Resources/AppIcon.icns"
+            if let oldIconData = fileManager.contents(atPath: oldIconPath) {
+                iconChanged = oldIconData != fileManager.contents(atPath: newIconPath)
+            } else {
+                iconChanged = true
+            }
+        } else {
+            iconChanged = false
+        }
+
+        if bundleExisted {
             try fileManager.removeItem(atPath: naming.bundlePath)
         }
         try fileManager.copyItem(atPath: appDir.path, toPath: naming.bundlePath)
@@ -172,6 +197,8 @@ enum Installer {
             throw InstallError.verificationFailed(
                 "配置済みコマンドの --help 実行がexit code \(helpExitCode) で終了しました")
         }
+
+        return InstallOutcome(replacedExistingBundle: bundleExisted, iconChanged: iconChanged)
     }
 
     /// 実行中の自分自身のバイナリパスを `_NSGetExecutablePath` で解決する
