@@ -68,6 +68,49 @@ final class ProfileDispatchTests: XCTestCase {
         XCTAssertThrowsError(try ProfileNaming.forProfile("cla ude"))
     }
 
+    // MARK: - ProfileNaming.recognize: reverse lookup (往復一致, Requirement 14.7)
+
+    func testRecognizeYobirinAppAsDefault() {
+        XCTAssertEqual(
+            ProfileNaming.recognize(appDirectoryName: "Yobirin.app", homeDirectory: "/Users/mjun"),
+            .default)
+    }
+
+    func testRecognizeYobirinClaudeAppAsProfileClaude() {
+        XCTAssertEqual(
+            ProfileNaming.recognize(
+                appDirectoryName: "Yobirin-Claude.app", homeDirectory: "/Users/mjun"),
+            .profile("claude"))
+    }
+
+    func testRecognizeRejectsUppercaseSuffixThatDoesNotRoundTrip() {
+        // 順方向導出は "claude" -> "Yobirin-Claude" のように先頭のみ大文字化するため、
+        // "Yobirin-ABC.app" は逆引きした "abc" からの順方向導出 "Yobirin-Abc" と一致せず棄却される。
+        XCTAssertNil(
+            ProfileNaming.recognize(appDirectoryName: "Yobirin-ABC.app", homeDirectory: "/Users/mjun"))
+    }
+
+    func testRecognizeRejectsHyphenatedInnerNameInvalidAsProfile() {
+        XCTAssertNil(
+            ProfileNaming.recognize(
+                appDirectoryName: "Yobirin-My-App.app", homeDirectory: "/Users/mjun"))
+    }
+
+    func testRecognizeRejectsUnrelatedAppName() {
+        XCTAssertNil(
+            ProfileNaming.recognize(appDirectoryName: "Other.app", homeDirectory: "/Users/mjun"))
+    }
+
+    func testRecognizeRejectsNonAppSuffix() {
+        XCTAssertNil(
+            ProfileNaming.recognize(appDirectoryName: "Yobirin", homeDirectory: "/Users/mjun"))
+    }
+
+    func testRecognizeRejectsEmptyProfileSuffix() {
+        XCTAssertNil(
+            ProfileNaming.recognize(appDirectoryName: "Yobirin-.app", homeDirectory: "/Users/mjun"))
+    }
+
     // MARK: - ProfileDispatch.buildExecArguments (pure function, Requirement 10.4)
 
     func testBuildExecArgumentsReplacesArgv0AndPassesThroughOtherArguments() {

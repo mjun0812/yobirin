@@ -72,6 +72,41 @@ struct ProfileNaming: Equatable {
             machOPath: "\(bundlePath)/Contents/MacOS/\(executableName)"
         )
     }
+
+    /// バンドルディレクトリ名の逆引き結果 (design.md ListCommand「往復一致」、Requirement 14.7)。
+    enum RecognizedBundle: Equatable {
+        case `default`
+        case profile(String)
+    }
+
+    /// バンドルディレクトリ名 (`Yobirin.app` / `Yobirin-<Suffix>.app`) からプロファイルを逆引きする
+    /// (design.md ListCommand責務、Requirement 14.7)。
+    ///
+    /// 往復一致 (逆引きした名前から順方向導出したappNameが同じディレクトリ名になる) を要求する。
+    /// `Yobirin-ABC.app` (順方向導出は `Yobirin-Abc`) や `Yobirin-My-App.app` (`my-app` は
+    /// `validate` を通らない) のような規約外の名前は `nil` を返して棄却する。
+    static func recognize(appDirectoryName: String, homeDirectory: String = NSHomeDirectory())
+        -> RecognizedBundle?
+    {
+        let suffix = ".app"
+        guard appDirectoryName.hasSuffix(suffix) else { return nil }
+        let appName = String(appDirectoryName.dropLast(suffix.count))
+
+        if appName == "Yobirin" {
+            return .default
+        }
+
+        let profilePrefix = "Yobirin-"
+        guard appName.hasPrefix(profilePrefix) else { return nil }
+        let candidate = appName.dropFirst(profilePrefix.count).lowercased()
+
+        guard let naming = try? forProfile(candidate, homeDirectory: homeDirectory),
+            naming.appName == appName
+        else {
+            return nil
+        }
+        return .profile(candidate)
+    }
 }
 
 /// `--profile` 指定時に対象バンドルのMach-Oへ実行を引き継ぐ薄いディスパッチ
