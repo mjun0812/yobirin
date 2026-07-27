@@ -44,6 +44,15 @@ final class YobirinCommandTests: XCTestCase {
         }
     }
 
+    func testPsSubcommandResolvesToPsCommand() throws {
+        let parsed = try YobirinCommand.parseAsRoot(["ps"])
+
+        guard parsed is PsCommand else {
+            XCTFail("\"ps\" はPsCommandへ解決されるべき")
+            return
+        }
+    }
+
     func testDefaultSubcommandResolvesToNotifyCommandWithRequiredOptionsOnly() throws {
         let parsed = try YobirinCommand.parseAsRoot(["--title", "hello", "--message", "body"])
 

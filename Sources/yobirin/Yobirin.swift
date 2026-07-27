@@ -69,7 +69,7 @@ enum LaunchGate {
         if rest.contains("--help") || rest.contains("-h") || rest.contains("--version") {
             return true
         }
-        return ["install", "list"].contains(rest.first { !$0.hasPrefix("-") })
+        return ["install", "list", "ps"].contains(rest.first { !$0.hasPrefix("-") })
     }
 }
 
@@ -80,7 +80,7 @@ enum LaunchGate {
 struct YobirinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         version: YobirinVersion.current,
-        subcommands: [NotifyCommand.self, InstallCommand.self, ListCommand.self],
+        subcommands: [NotifyCommand.self, InstallCommand.self, ListCommand.self, PsCommand.self],
         defaultSubcommand: NotifyCommand.self
     )
 }

@@ -180,6 +180,25 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         XCTAssertTrue(result.stdout.hasPrefix("{\"bundles\":"))
     }
 
+    // MARK: - A. ps (バンドル外、実プロセス起動)
+    // (Requirements 15.1, 15.5, 15.9。実環境の待機プロセスの有無・内容には依存せず、
+    // 「通知APIに触れずクラッシュなく完走する」ことをexit 0・stderr空・出力形状のみで確認する。)
+
+    func testOutsideBundleWithPsCompletesWithoutTouchingNotificationAPI() throws {
+        let result = try runYobirin(arguments: ["ps"])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
+    func testOutsideBundleWithPsJSONCompletesWithoutTouchingNotificationAPI() throws {
+        let result = try runYobirin(arguments: ["ps", "--json"])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stderr.isEmpty)
+        XCTAssertTrue(result.stdout.hasPrefix("{\"processes\":"))
+    }
+
     // MARK: - A. symlink経由起動 (実体パスへの再exec。design.md CLIとアプリの二面性)
 
     func testSymlinkToPlainBinaryReExecsAndStillGuidesInstallWithoutRecursion() throws {

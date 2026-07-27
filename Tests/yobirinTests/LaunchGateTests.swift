@@ -88,6 +88,17 @@ final class LaunchGateTests: XCTestCase {
             .runCLI)
     }
 
+    func testOutsideBundleWithPsRunsCLI() {
+        XCTAssertEqual(
+            LaunchGate.decide(arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true), .runCLI)
+    }
+
+    func testOutsideBundleWithPsJSONRunsCLI() {
+        XCTAssertEqual(
+            LaunchGate.decide(arguments: ["/path/to/yobirin", "ps", "--json"], isOutsideBundle: true),
+            .runCLI)
+    }
+
     func testOutsideBundleWithLeadingBareFlagBeforeInstallStillRunsCLI() {
         // "install" の判定は「実行ファイル名を除く最初の"非フラグ"引数」であり、
         // 先行する値を取らないフラグ (例: `--verbose`) の有無に左右されない。
