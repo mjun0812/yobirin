@@ -34,6 +34,7 @@
 - `.app` バンドルの構成と、CLI自身によるバンドル組み立て・インストール (`install` サブコマンド)
 - インストール構成: `~/Applications` への配置、PATH上のsymlink (1本)、アイコンプロファイル (派生バンドル) と `--profile` ディスパッチ
 - インストール済みバンドルの一覧表示 (`list` サブコマンド。テキスト / `--json`)
+- 待機中プロセスの一覧表示 (`ps` サブコマンド。テキスト / `--json`)
 - 実行ファイルのビルドパイプライン (CI) とリリース配布 (ユニバーサルバイナリの添付)
 
 ### Out of Boundary
@@ -81,7 +82,7 @@ flowchart LR
 
 yobirinがアプリ (`.app`) である理由は `UNUserNotificationCenter` がバンドルを要求するという一点であり、**アプリの側面を必要とするのは通知に関わる機能だけ**である。この境界を設計原則として固定する:
 
-- コマンドは**通知系** (バンドル必須。既定の通知送信、引数なし時の孤児掃除) と**インストール系** (バンドル不要。`install` / `list` サブコマンド) の2群に分類する
+- コマンドは**通知系** (バンドル必須。既定の通知送信、引数なし時の孤児掃除) と**インストール系** (バンドル不要。`install` / `list` / `ps` サブコマンド) の2群に分類する
 - インストール系は通知APIの型に一切触れない。素のMach-O (リリースから落とした直後のバイナリ) で完走する (Requirement 12.1。実測: ArgumentParserはマッチした葉コマンドの `run()` だけを呼ぶため構造的に保証できる)
 - 起動フローの最初に**バンドル外検知** (`Bundle.main.bundleIdentifier == nil`) を置き、バンドル外での通知系要求は案内メッセージ + 非0終了に振り替える (Requirement 12.2/12.3。現状は `UNNotificationCenterAdapter` の非lazyな格納プロパティによりSIGABRTする — 実測)
 - ただし**CFBundleは実行パスのsymlinkを解決しない** (実測: PATH上のsymlink経由のexecでは、バンドル内実体を指していても `Bundle.main.bundleIdentifier` がnilになる。UN層のLaunchServicesはrealpathで解決するため通知自体は出せる)。バンドル未解決かつ実行パスがrealpathと異なる場合は、判定より先に**実体パスへ再exec**して直接実行と同一条件に正規化する。再exec後は実行パス==realpathのため再帰は起きない
@@ -126,6 +127,7 @@ Sources/yobirin/
 ├── ProfileDispatch.swift        # --profile指定時に対象バンドルのMach-Oへexecする薄いディスパッチ
 ├── InstallCommand.swift         # installサブコマンドの引数定義 (--profile / --icon)
 ├── ListCommand.swift            # listサブコマンド (バンドル走査・一覧出力・--json)
+├── PsCommand.swift              # psサブコマンド (通知待機プロセスの走査・一覧出力・--json)
 ├── BundleEnvironment.swift      # バンドル内外判定 + symlink起動の実体パス再exec正規化
 ├── Installer.swift              # バンドル組み立て・配置・symlink・署名・起動検証のオーケストレーション
 ├── IcnsWriter.swift             # ImageIOによるicns生成 (10スロット、DPIメタデータ付与)
@@ -190,11 +192,12 @@ flowchart TD
     inBundle -->|バンドル外| outCmd{コマンド種別}
     noargs -->|はい| sweep[孤児通知の掃除 → exit 0]
     noargs -->|いいえ| route[ArgumentParserルーティング]
-    outCmd -->|install / list / --help| route
+    outCmd -->|install / list / ps / --help| route
     outCmd -->|通知系 / 引数なし| guide[インストール案内をstderrへ → 非0 exit<br>クラッシュさせない]
     route --> notify[notify 通知送信<br>既定サブコマンド]
     route --> install[install バンドル組み立て]
     route --> list[list インストール済みバンドルの一覧]
+    route --> ps[ps 待機中プロセスの一覧]
     notify --> prof{--profile指定?}
     prof -->|あり| exec[対象バンドルのMach-Oへexec<br>--profileを除いた引数で再実行]
     prof -->|なし| unflow[認可→配信→応答→JSON→遅延exit]
@@ -237,24 +240,26 @@ flowchart TD
 | 12          | バンドル外実行時の安全性       | Yobirin (起動ゲート), NotificationCenterClient     | -                             | 起動ゲートフロー          |
 | 13          | ビルド済みバイナリの配布       | Release CI                                         | -                             | -                         |
 | 14          | インストール済みバンドルの一覧 | ListCommand, ProfileDispatch (ProfileNaming逆引き) | CLI契約 (list) / 一覧JSON契約 | 起動ゲートフロー          |
+| 15          | 待機中プロセスの一覧           | PsCommand, ProfileDispatch (ProfileNaming逆引き)   | CLI契約 (ps) / psJSON契約     | 起動ゲートフロー          |
 
 ## Components and Interfaces
 
-| Component           | Domain/Layer | Intent                                                       | Req Coverage | Key Dependencies           | Contracts       |
-| ------------------- | ------------ | ------------------------------------------------------------ | ------------ | -------------------------- | --------------- |
-| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12       | swift-argument-parser (P0) | CLI             |
-| NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証         | 1, 2, 4, 5   | swift-argument-parser (P0) | CLI             |
-| ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec               | 10           | Darwin execv (P0)          | CLI             |
-| InstallCommand      | Install      | installサブコマンドの引数定義                                | 11           | swift-argument-parser (P0) | CLI             |
-| ListCommand         | Install      | インストール済みバンドルの走査と一覧出力 (テキスト / JSON)   | 14           | swift-argument-parser (P0) | CLI, API (JSON) |
-| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証          | 8, 9, 11     | 外部codesign (P0)          | Batch           |
-| IcnsWriter          | Install      | ImageIOによるicns生成 (10スロット)                           | 11           | ImageIO (P0)               | -               |
-| DefaultIcon         | Install      | 同梱標準アイコンのバイト列 (生成済みソース)                  | 11           | -                          | -               |
-| AppLifecycle        | App          | NSApplication起動、認可フロー、引数なしガード、遅延exit      | 5, 6, 7      | AppKit (P0)                | -               |
-| NotificationSession | Notification | category登録・group置換・通知add・応答処理・結果の排他確定   | 2, 3, 4, 5   | UserNotifications (P0)     | State           |
-| ResultEmitter       | Output       | 結果JSON生成・stdout出力・終了コード                         | 3, 7         | Foundation (P0)            | API (JSON)      |
-| Release CI          | Build        | v*タグ→テスト→ユニバーサル実行ファイル→Release作成           | 9, 13        | GitHub Actions (P0)        | Batch           |
-| Install layout      | Distribution | `~/Applications` 配置・symlink 1本・プロファイル派生バンドル | 8, 10        | -                          | -               |
+| Component           | Domain/Layer | Intent                                                       | Req Coverage | Key Dependencies             | Contracts       |
+| ------------------- | ------------ | ------------------------------------------------------------ | ------------ | ---------------------------- | --------------- |
+| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12       | swift-argument-parser (P0)   | CLI             |
+| NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証         | 1, 2, 4, 5   | swift-argument-parser (P0)   | CLI             |
+| ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec               | 10           | Darwin execv (P0)            | CLI             |
+| InstallCommand      | Install      | installサブコマンドの引数定義                                | 11           | swift-argument-parser (P0)   | CLI             |
+| ListCommand         | Install      | インストール済みバンドルの走査と一覧出力 (テキスト / JSON)   | 14           | swift-argument-parser (P0)   | CLI, API (JSON) |
+| PsCommand           | Install      | 通知待機プロセスの走査と一覧出力 (テキスト / JSON)           | 15           | Darwin sysctl / libproc (P0) | CLI, API (JSON) |
+| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証          | 8, 9, 11     | 外部codesign (P0)            | Batch           |
+| IcnsWriter          | Install      | ImageIOによるicns生成 (10スロット)                           | 11           | ImageIO (P0)                 | -               |
+| DefaultIcon         | Install      | 同梱標準アイコンのバイト列 (生成済みソース)                  | 11           | -                            | -               |
+| AppLifecycle        | App          | NSApplication起動、認可フロー、引数なしガード、遅延exit      | 5, 6, 7      | AppKit (P0)                  | -               |
+| NotificationSession | Notification | category登録・group置換・通知add・応答処理・結果の排他確定   | 2, 3, 4, 5   | UserNotifications (P0)       | State           |
+| ResultEmitter       | Output       | 結果JSON生成・stdout出力・終了コード                         | 3, 7         | Foundation (P0)              | API (JSON)      |
+| Release CI          | Build        | v*タグ→テスト→ユニバーサル実行ファイル→Release作成           | 9, 13        | GitHub Actions (P0)          | Batch           |
+| Install layout      | Distribution | `~/Applications` 配置・symlink 1本・プロファイル派生バンドル | 8, 10        | -                            | -               |
 
 ### CLI
 
@@ -297,6 +302,10 @@ yobirin install
 # 一覧 (バンドル不要。素のバイナリから実行できる)
 yobirin list
         [--json]                 # 機械可読なJSON (一覧JSON契約) をstdoutへ出力
+
+# 待機中プロセスの一覧 (バンドル不要。素のバイナリから実行できる)
+yobirin ps
+        [--json]                 # 機械可読なJSON (psJSON契約) をstdoutへ出力
 ```
 
 - Preconditions: `--title` と `--message` は必須。バンドル内での引数なし起動は通知を出さず即exit (孤児掃除)、バンドル外ではインストール案内 (起動ゲート)
@@ -412,6 +421,24 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 - 通知APIの型に一切触れない (14.10)。起動ゲートのバンドル外許可リストへ `list` を追加する
 - `homeDirectory` / ファイル操作は注入可能とし、テンポラリ領域に組み立てた偽バンドルでテストできる構造にする (Installerと同じ方針)
 
+#### PsCommand
+
+| Field        | Detail                                                              |
+| ------------ | ------------------------------------------------------------------- |
+| Intent       | 通知の結果を待機している自ユーザーのyobirinプロセスの走査と一覧出力 |
+| Requirements | 15                                                                  |
+
+**Responsibilities & Constraints**
+
+- 走査は `proc_listpids` で自ユーザーのPIDを列挙し、各PIDについて `proc_pidpath` (実行ファイルパス)・`KERN_PROCARGS2` (argv)・`kinfo_proc.p_starttime` (起動時刻) を読む (いずれも非特権で可能なことを2026-07-28スパイクで実測済み。他ユーザーのプロセスは `errno=EINVAL` で拒否されるため、15.1の「自ユーザーのみ」はOSが強制する)
+- **対象判定は2条件のAND** (15.2): (1) 実行ファイルパスが命名規約のバンドル内Mach-O (`ProfileNaming.recognize` で逆引きできる `.app` の `Contents/MacOS/yobirin`) であること — symlink再execと `--profile` ディスパッチの正規化により、通知待機プロセスの実行パスは必ずバンドル内実体になっている。(2) argvに `--title` (または `--title=`) が含まれること — notify系の必須オプションであり、`install` / `list` / `ps` / 掃除 (引数なし) は持たないため、この述語だけで通知送信の待機プロセスを正確に選別できる。自分自身のPIDは常に除外する
+- 表示項目 (15.3): PID・プロファイル (実行パスの `.app` 名から逆引き。デフォルトは `(default)` / JSON `null`)・タイトル (argvの `--title` 値)・タイムアウト (argvの `--timeout` 値。未指定は `-` / `null`)・経過時間 (現在時刻 − 起動時刻)
+- 順序 (15.4): 起動時刻の古い順、同時刻はPID昇順
+- argvが読み取れないプロセス (走査中の消滅等) は、実行パス条件を満たす場合のみタイトル等を欠損 (`-` / `null`) として表示し継続する (15.7)。PID列挙自体の失敗は環境エラー (stderr + 非0 — 15.8)
+- 0件はテキストで案内 + exit 0、`--json` は `{"processes":[]}` + exit 0 (15.6)
+- 通知APIの型に一切触れない (15.9)。起動ゲートのバンドル外許可リストへ `ps` を追加する
+- 走査 (PID列挙・プロセス情報読み取り) と現在時刻はクロージャ注入可能とし、fakeレコードで全分岐をテストできる構造にする (ListCommandと同じ方針)
+
 #### Release CI
 
 | Field        | Detail                                   |
@@ -509,6 +536,43 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 
 - 0件のときも `--json` は `{"bundles":[]}` + exit 0 (空配列自体が「なし」を機械可読に伝える。テキストモードの案内文はJSONでは出さない)
 
+### psJSON契約 (ps --json)
+
+```json
+{
+  "processes": [
+    {
+      "pid": 4211,
+      "profile": null,
+      "title": "ビルド完了",
+      "timeoutSeconds": 300,
+      "elapsedSeconds": 42,
+      "path": "/Users/x/Applications/Yobirin.app/Contents/MacOS/yobirin"
+    },
+    {
+      "pid": 4300,
+      "profile": "claude",
+      "title": "確認",
+      "timeoutSeconds": null,
+      "elapsedSeconds": 754,
+      "path": "/Users/x/Applications/Yobirin-Claude.app/Contents/MacOS/yobirin"
+    }
+  ]
+}
+```
+
+| フィールド       | 型             | 説明                                                      |
+| ---------------- | -------------- | --------------------------------------------------------- |
+| `processes`      | array          | 起動時刻の古い順 (同時刻はPID昇順)。0件なら空配列         |
+| `pid`            | number         | プロセスID                                                |
+| `profile`        | string \| null | プロファイル名 (実行パスから逆引き)。デフォルトは `null`  |
+| `title`          | string \| null | argvの `--title` 値。argvが読み取れない場合は `null`      |
+| `timeoutSeconds` | number \| null | argvの `--timeout` 値 (秒)。未指定・読み取り不能は `null` |
+| `elapsedSeconds` | number         | 起動からの経過秒                                          |
+| `path`           | string         | 実行ファイルの絶対パス                                    |
+
+- テキスト表示の経過時間は人間可読 (`42s` / `12m34s` / `1h02m` 等) に整形するが、JSONは秒数のまま出す
+
 ## Error Handling
 
 ### Error Strategy
@@ -517,13 +581,13 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 
 ### 終了コード
 
-| 終了コード | 意味                                                                                        | stdout                                   | stderr                                                        |
-| ---------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
-| 0          | ユーザー応答またはtimeoutで正常確定。install / listの正常完了 (一覧0件を含む)               | 結果JSON (installはなし、listは一覧出力) | -                                                             |
-| 2          | 通知許可なし (`UNErrorDomain Code=1` エラー / `granted == false` の両経路)                  | なし                                     | 理由を出力。呼び出し側がosascript等へfallbackできるようにする |
-| その他非0  | 環境エラー (引数不正、プロファイル未インストール、バンドル外での通知要求、インストール失敗) | なし                                     | エラー内容 / インストール案内                                 |
+| 終了コード | 意味                                                                                        | stdout                                        | stderr                                                        |
+| ---------- | ------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------- |
+| 0          | ユーザー応答またはtimeoutで正常確定。install / list / psの正常完了 (一覧0件を含む)          | 結果JSON (installはなし、list / psは一覧出力) | -                                                             |
+| 2          | 通知許可なし (`UNErrorDomain Code=1` エラー / `granted == false` の両経路)                  | なし                                          | 理由を出力。呼び出し側がosascript等へfallbackできるようにする |
+| その他非0  | 環境エラー (引数不正、プロファイル未インストール、バンドル外での通知要求、インストール失敗) | なし                                          | エラー内容 / インストール案内                                 |
 
-インストール系の失敗はすべて環境エラー (非0 + stderr) として扱う: アイコンファイル不在・読込不可、署名失敗 (Requirement 11.6)、配置先の非symlink実ファイル衝突 (非破壊で中断)、起動検証失敗 (Requirement 11.9)、一覧の走査失敗 (Requirement 14.9)。バンドル外での通知要求・引数なし起動はクラッシュさせず案内を出す (Requirement 12.2/12.3。現状のSIGABRT + クラッシュレポート生成を解消する)。
+インストール系の失敗はすべて環境エラー (非0 + stderr) として扱う: アイコンファイル不在・読込不可、署名失敗 (Requirement 11.6)、配置先の非symlink実ファイル衝突 (非破壊で中断)、起動検証失敗 (Requirement 11.9)、一覧の走査失敗 (Requirement 14.9)、プロセス走査の失敗 (Requirement 15.8)。バンドル外での通知要求・引数なし起動はクラッシュさせず案内を出す (Requirement 12.2/12.3。現状のSIGABRT + クラッシュレポート生成を解消する)。
 
 ### 再起動・孤児通知への防御
 
@@ -552,6 +616,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - 起動ゲート: バンドル外×通知系 → 案内 + 非0、バンドル外×install / list → 続行、の分岐 (バンドル判定は注入で差し替え)
 - ListCommand: 命名規約の往復一致判定 (対象 / 除外の両方)、順序 (デフォルト先頭 + 名前昇順)、Info.plist欠損時の `-` / `null` 表示と継続、0件のexit 0、`--json` のスキーマ (テンポラリ領域に偽バンドルを構成して検証 — 14.2〜14.8)
 - ProfileNaming逆引き: バンドル名 → プロファイル名の往復一致、規約外名の棄却 (14.7)
+- PsCommand: 対象判定 (バンドル内パス × `--title` 有無のAND。install/list/ps/掃除/自PIDの除外)、argvからのタイトル・タイムアウト抽出 (`--title x` / `--title=x` 両形式)、順序 (起動時刻昇順 + PIDタイブレーク)、argv欠損の `-` / `null` 継続、0件のexit 0、走査失敗の非0、経過時間の整形、`--json` のスキーマ (fakeレコード注入で検証 — 15.2〜15.8)
 
 ### Integration Tests (半自動)
 
@@ -559,6 +624,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - timeout確定時に通知削除 → JSON出力 → 遅延 → exit の順で処理されること
 - 結果確定の排他: 応答とタイマーの競合で出力が一度きりであること
 - 実プロセス起動: バンドル外の実バイナリで `list` が通知APIに触れず完走する (14.10。既存のProcessLaunchIntegrationTestsの枠組みを使う。実ホームを読むだけの読み取り専用なので安全)
+- 実プロセス起動: バンドル外の実バイナリで `ps` / `ps --json` が通知APIに触れず完走する (15.9。プロセス走査は読み取り専用。assertは実環境の内容に依存しない形状確認のみ)
 
 ### 手動検証チェックリスト (GUI必須)
 

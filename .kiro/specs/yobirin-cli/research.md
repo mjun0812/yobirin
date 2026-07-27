@@ -181,6 +181,13 @@ Swiftプロトタイプ (約180行 + `.app` バンドル + ad-hoc署名) での�
 - **Rationale**: 往復一致なら `Yobirin-My-App.app` (規約外) や `Yobirin-ABC.app` (導出不一致) を機械的に排除でき、判定ロジックの二重実装も生まれない。実態読み取りは「規約とズレた壊れバンドル」の診断にそのまま使える
 - **Trade-offs**: Info.plist読み取りのI/Oが増えるが、一覧は対話用途で件数も少数のため無視できる。JSONスキーマ (`{"bundles":[...]}`) は新たな呼び出し側契約になるためRevalidation Triggerへ追加した
 
+### Decision: `ps` の待機プロセス判定は「バンドル内実行パス × argvの`--title`」のAND (2026-07-28)
+
+- **Context**: Requirement 15 (待機中プロセスの一覧表示)。通知の結果を待つプロセスだけを、UN APIに触れずに正確に選別する必要がある。実現機構はスパイクで実測済み: `proc_listpids` (自ユーザー列挙) / `proc_pidpath` (実行パス) / `KERN_PROCARGS2` (argv。argc読み取り→exec_path/NULパディングスキップで正しくパースできる) / `kinfo_proc.p_starttime` (起動時刻) — すべて非特権で動作し、他ユーザーのプロセスは `errno=EINVAL` で拒否される (「自ユーザーのみ」はOSが強制)
+- **Selected Approach**: 対象判定は (1) 実行ファイルパスが `ProfileNaming.recognize` で逆引きできるバンドル内Mach-O、かつ (2) argvに `--title`/`--title=` を含む、のAND。自PIDは除外
+- **Rationale**: (1) symlink再execと `--profile` ディスパッチの正規化により、通知待機プロセスの実行パスは必ずバンドル内実体になっている (設計済みの不変条件を判定に再利用)。(2) `--title` はnotify系の必須オプションで `install` / `list` / `ps` / 掃除は持たないため、追加の状態管理 (PIDファイル等) なしで正確に選別できる
+- **Trade-offs**: バンドル外で直接実行された通知要求は対象外だが、それは起動ゲートが案内+非0で即終了させる経路であり待機プロセスになり得ない。`--title` 付き `--help` のような一瞬のプロセスが走査の瞬間に混ざる可能性は理論上あるが、寿命がミリ秒単位で実害なし
+
 ## Risks & Mitigations
 
 - macOSアップデートで `customDismissAction` や再起動挙動が変わる — 手動検証チェックリストをOSアップデート後に再実行する
