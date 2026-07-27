@@ -83,6 +83,7 @@ yobirinがアプリ (`.app`) である理由は `UNUserNotificationCenter` が�
 - コマンドは**通知系** (バンドル必須。既定の通知送信、引数なし時の孤児掃除) と**インストール系** (バンドル不要。`install` サブコマンド) の2群に分類する
 - インストール系は通知APIの型に一切触れない。素のMach-O (リリースから落とした直後のバイナリ) で完走する (Requirement 12.1。実測: ArgumentParserはマッチした葉コマンドの `run()` だけを呼ぶため構造的に保証できる)
 - 起動フローの最初に**バンドル外検知** (`Bundle.main.bundleIdentifier == nil`) を置き、バンドル外での通知系要求は案内メッセージ + 非0終了に振り替える (Requirement 12.2/12.3。現状は `UNNotificationCenterAdapter` の非lazyな格納プロパティによりSIGABRTする — 実測)
+- ただし**CFBundleは実行パスのsymlinkを解決しない** (実測: PATH上のsymlink経由のexecでは、バンドル内実体を指していても `Bundle.main.bundleIdentifier` がnilになる。UN層のLaunchServicesはrealpathで解決するため通知自体は出せる)。バンドル未解決かつ実行パスがrealpathと異なる場合は、判定より先に**実体パスへ再exec**して直接実行と同一条件に正規化する。再exec後は実行パス==realpathのため再帰は起きない
 - 配布物と実体は単一バイナリのまま (自己複製でバンドルを組み立てるため、分割すると「1つ落とせば済む」が成立しない)
 
 #### .appバンドル必須問題
@@ -178,7 +179,10 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    start([プロセス起動]) --> inBundle{バンドル内か?<br>Bundle.main.bundleIdentifier}
+    start([プロセス起動]) --> relink{symlink経由起動?<br>バンドル未解決 かつ 実行パス≠realpath}
+    relink -->|はい| reexec[実体パスへ再exec<br>直接実行と同一条件に正規化]
+    reexec --> start
+    relink -->|いいえ| inBundle{バンドル内か?<br>Bundle.main.bundleIdentifier}
     inBundle -->|バンドル内| noargs{引数なし?}
     inBundle -->|バンドル外| outCmd{コマンド種別}
     noargs -->|はい| sweep[孤児通知の掃除 → exit 0]

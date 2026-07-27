@@ -12,4 +12,44 @@ enum BundleEnvironment {
     static func isOutsideBundle(bundleIdentifier: String? = Bundle.main.bundleIdentifier) -> Bool {
         bundleIdentifier == nil
     }
+
+    /// symlink経由起動の再exec先を判定する純粋関数。
+    ///
+    /// CFBundleは実行パスのsymlinkを解決しないため、PATH上のsymlink経由でexecされると
+    /// バンドル内実体を指していても `Bundle.main.bundleIdentifier` がnilになる (実測。
+    /// UN層のLaunchServicesはrealpathで解決するため通知自体は出せるが、起動ゲートが
+    /// バンドル外と誤判定してしまう)。バンドル未解決かつ実行パスがrealpathと異なる場合は
+    /// 実体パスを返し、呼び出し側がそこへ再execすることで直接実行と同一条件に正規化する。
+    /// 再exec後のプロセスは実行パス==realpathとなるため、再帰は構造的に起きない。
+    static func reExecTarget(
+        bundleIdentifier: String?,
+        executablePath: String,
+        resolvedExecutablePath: String
+    ) -> String? {
+        guard bundleIdentifier == nil, executablePath != resolvedExecutablePath else {
+            return nil
+        }
+        return resolvedExecutablePath
+    }
+
+    /// 実配線: symlink経由起動なら実体パスへexecvで再実行する (成功時は返らない)。
+    /// 失敗時・非該当時はそのまま返り、既存の起動ゲートフローへ進む。
+    static func reExecThroughSymlinkIfNeeded() {
+        var size: UInt32 = 0
+        _NSGetExecutablePath(nil, &size)
+        var buffer = [Int8](repeating: 0, count: Int(size))
+        guard _NSGetExecutablePath(&buffer, &size) == 0 else { return }
+        let executablePath = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        guard
+            let target = reExecTarget(
+                bundleIdentifier: Bundle.main.bundleIdentifier,
+                executablePath: executablePath,
+                resolvedExecutablePath: URL(fileURLWithPath: executablePath)
+                    .resolvingSymlinksInPath().path
+            )
+        else { return }
+        var arguments = CommandLine.arguments
+        arguments[0] = target
+        ProfileDispatch.defaultExec(target, arguments)
+    }
 }

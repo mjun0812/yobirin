@@ -12,6 +12,9 @@ import Foundation
 @main
 enum YobirinMain {
     static func main() {
+        // symlink経由起動 (CFBundleがバンドルを解決できない) は実体パスへ再execして
+        // 直接実行と同一条件に正規化してからゲート判定する (詳細はBundleEnvironment参照)。
+        BundleEnvironment.reExecThroughSymlinkIfNeeded()
         let decision = LaunchGate.decide(
             arguments: CommandLine.arguments,
             isOutsideBundle: BundleEnvironment.isOutsideBundle()

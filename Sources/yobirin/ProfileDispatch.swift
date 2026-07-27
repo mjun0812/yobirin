@@ -141,7 +141,8 @@ enum ProfileDispatch {
         FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
-    private static func defaultExec(_ path: String, _ arguments: [String]) {
+    /// `BundleEnvironment.reExecThroughSymlinkIfNeeded` からも共用するためinternal。
+    static func defaultExec(_ path: String, _ arguments: [String]) {
         var cArgs: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         cArgs.append(nil)
         execv(path, &cArgs)
