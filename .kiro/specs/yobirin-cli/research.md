@@ -174,6 +174,13 @@ Swiftプロトタイプ (約180行 + `.app` バンドル + ad-hoc署名) での�
 | バンドル組み立て     | swift-notifierの `build-app.sh` を踏襲 (M2aで手作業成立を確認済み)                                              |
 | インストール先       | `~/Applications` 等の正規の場所。同一Bundle IDを複数箇所に登録しない                                            |
 
+### Decision: `list` の対象判定は命名規約との往復一致、表示値はInfo.plistの実態 (2026-07-28)
+
+- **Context**: Requirement 14 (インストール済みバンドルの一覧表示) の追加。`~/Applications` の走査で「yobirinのバンドルだけ」を確実に選別し、診断に使える情報を出す必要がある
+- **Selected Approach**: (1) 対象判定は `ProfileNaming` の命名規約との**往復一致** — `Yobirin-<suffix>.app` はsuffixを小文字化→プロファイル名として検証→順方向導出がディレクトリ名と一致するもののみ採用。逆引きAPIは `ProfileNaming` へ追加。(2) 表示するBundle ID・バージョンは規約からの導出値ではなく配置済み `Info.plist` から読む。読めない項目は欠損 (`-` / `null`) で継続
+- **Rationale**: 往復一致なら `Yobirin-My-App.app` (規約外) や `Yobirin-ABC.app` (導出不一致) を機械的に排除でき、判定ロジックの二重実装も生まれない。実態読み取りは「規約とズレた壊れバンドル」の診断にそのまま使える
+- **Trade-offs**: Info.plist読み取りのI/Oが増えるが、一覧は対話用途で件数も少数のため無視できる。JSONスキーマ (`{"bundles":[...]}`) は新たな呼び出し側契約になるためRevalidation Triggerへ追加した
+
 ## Risks & Mitigations
 
 - macOSアップデートで `customDismissAction` や再起動挙動が変わる — 手動検証チェックリストをOSアップデート後に再実行する
