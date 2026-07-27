@@ -129,6 +129,15 @@ $ yobirin --profile claude --title "Claude" --message "完了"
 
 プロファイル名に使えるのは英小文字と数字のみ (`^[a-z0-9]+$`)。`--icon` を省略すると同梱の標準アイコン (鈴) が使われる。
 
+`yobirin list` でインストール済みのバンドル (デフォルトと全プロファイル) をBundle ID・バージョン・パス付きで一覧できる。`--json` で機械可読な出力になる:
+
+```console
+$ yobirin list
+PROFILE    BUNDLE ID                    VERSION  PATH
+(default)  com.mjun0812.yobirin         0.2.0    /Users/you/Applications/Yobirin.app
+claude     com.mjun0812.yobirin.claude  0.2.0    /Users/you/Applications/Yobirin-Claude.app
+```
+
 ## 既知の制限
 
 - `--image`：添付自体はmacOSに受理・保存されるが、現行のmacOSはバナーにも通知センターにもサムネイルを描画しない。

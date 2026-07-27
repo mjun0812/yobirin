@@ -120,6 +120,15 @@ This installs `Yobirin-Claude.app` (bundle ID `com.mjun0812.yobirin.claude`) wit
 
 Profile names must match `^[a-z0-9]+$`. Omitting `--icon` installs the bundled default bell icon.
 
+`yobirin list` shows every installed bundle (the default plus all profiles) with its bundle ID, version, and path; add `--json` for machine-readable output:
+
+```console
+$ yobirin list
+PROFILE    BUNDLE ID                    VERSION  PATH
+(default)  com.mjun0812.yobirin         0.2.0    /Users/you/Applications/Yobirin.app
+claude     com.mjun0812.yobirin.claude  0.2.0    /Users/you/Applications/Yobirin-Claude.app
+```
+
 ## Known limitations
 
 - `--image`: the attachment is accepted and stored by macOS, but current macOS versions do not render the thumbnail in banners or Notification Center.
