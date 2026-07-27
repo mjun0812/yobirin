@@ -153,7 +153,7 @@
   - _Depends: 7.1, 7.2_
 
 - [ ] 8. Integration: 結線と配布経路の置き換え
-- [ ] 8.1 installサブコマンドを結線し、バンドル組み立てを一元化する
+- [x] 8.1 installサブコマンドを結線し、バンドル組み立てを一元化する
   - `install [--profile <name>] [--icon <path>]` の引数定義をルートへ登録し、インストーラと結線する
   - scripts/build-app.sh と scripts/install.sh を削除する (組み立て実装はCLIの1箇所のみになる)
   - scripts/ の消滅に伴い、ci.yml のlintジョブからシェルスクリプト解析ステップ (shellcheck / shfmt) を除去する (oxfmtチェックとビルド・テストジョブは無変更)
