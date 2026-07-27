@@ -24,9 +24,9 @@ jobs:
           lipo -create \
             .build/arm64-apple-macosx/release/yobirin \
             .build/x86_64-apple-macosx/release/yobirin \
-            -output yobirin-universal
-          lipo -info yobirin-universal
+            -output yobirin
+          lipo -info yobirin
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --generate-notes yobirin-universal
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes yobirin

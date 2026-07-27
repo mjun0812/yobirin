@@ -450,7 +450,7 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 | Requirements | 9, 13                                    |
 
 - Trigger: `v*` タグのpush (`.github/workflows/release.yml`、既存のまま)
-- `swift test` 合格後に `swift build` ×2アーキ → `lipo -create` → `yobirin-universal` をGitHub Releaseへ添付
+- `swift test` 合格後に `swift build` ×2アーキ → `lipo -create` → `yobirin` (アセット名) をGitHub Releaseへ添付
 - バンドルは作らない (組み立てはInstallerの責務)
 
 #### Install layout
@@ -638,7 +638,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - 許可拒否時の exit 2 + stderr
 - 引数なし起動で通知が出ないこと。即exit再起動による余計な通知が出ないこと
 - 複数インスタンス並行実行で、クリックしたインスタンスにのみ応答が届くこと
-- リリースバイナリからのフルブートストラップ: 素の `yobirin-universal` で `install` → symlink経由で通知が出る → `install --profile <name> --icon <path>` → `--profile <name>` で当該アイコン・名義の通知が出る
+- リリースバイナリからのフルブートストラップ: 素のリリースバイナリで `install` → symlink経由で通知が出る → `install --profile <name> --icon <path>` → `--profile <name>` で当該アイコン・名義の通知が出る
 - バンドル外の素のバイナリで: 引数なし起動と通知送信がクラッシュせず案内 + 非0で終了すること (クラッシュレポートが生成されないこと)
 
 ## Supporting References

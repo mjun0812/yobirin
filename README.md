@@ -29,9 +29,9 @@ yobirin uses the current `UserNotifications` framework only. Dismissal is detect
 Download the prebuilt universal binary and let it install itself (requires the [gh CLI](https://cli.github.com/) while the repository is private):
 
 ```console
-$ gh release download --repo mjun0812/yobirin --pattern yobirin-universal
-$ chmod +x yobirin-universal
-$ ./yobirin-universal install
+$ gh release download --repo mjun0812/yobirin --pattern yobirin
+$ chmod +x yobirin
+$ ./yobirin install
 ```
 
 The binary copies itself into an ad-hoc signed `Yobirin.app`, places it into `~/Applications`, and symlinks the command into `~/.local/bin/yobirin` (make sure `~/.local/bin` is on your `PATH`, or set `YOBIRIN_BIN_DIR` to another directory). The downloaded file can be deleted afterwards.

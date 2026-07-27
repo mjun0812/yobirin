@@ -32,9 +32,9 @@ yobirinは現行の `UserNotifications` frameworkだけを使う。
 ビルド済みユニバーサルバイナリをダウンロードして、バイナリ自身にインストールさせる (privateリポジトリの間は [gh CLI](https://cli.github.com/) が必要):
 
 ```console
-$ gh release download --repo mjun0812/yobirin --pattern yobirin-universal
-$ chmod +x yobirin-universal
-$ ./yobirin-universal install
+$ gh release download --repo mjun0812/yobirin --pattern yobirin
+$ chmod +x yobirin
+$ ./yobirin install
 ```
 
 バイナリは自分自身を複製してad-hoc署名した `Yobirin.app` を組み立て、`~/Applications` へ配置して、コマンドを `~/.local/bin/yobirin` へsymlinkする (`~/.local/bin` をPATHに通すか、`YOBIRIN_BIN_DIR` で配置先を変更する)。ダウンロードしたファイルはインストール後に削除してよい。
