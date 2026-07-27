@@ -1,6 +1,6 @@
-# 手動検証チェックリスト (Task 5.2〜5.5)
+# 手動検証チェックリスト
 
-実施日: 2026-07-27
+実施日: 2026-07-27 (5.2〜5.5)、2026-07-28 (8.2/9.2)
 環境: macOS 26 / Darwin 25、`~/Applications/Yobirin.app` + `~/.local/bin/yobirin` (許可付与済み)
 
 結果は各項目の `[ ]` を `[x]` にし、備考欄に観測内容を記す。失敗した場合は `[!]` にして内容を記録する。
@@ -47,7 +47,33 @@
 
 備考: 4/4項目pass (2026-07-27)。検証後にYobirin-Claudeの通知はオンへ戻す (ユーザー操作)。
 
+## 8.2/9.2 ブートストラップとバンドル外安全性
+
+前提: 素バイナリは `swift build -c release` の成果物をダウンロード相当の場所 (テンポラリ領域) へ複製して使用 (公開済みv0.1.0添付バイナリは `install` 実装前のため対象外。次回リリースで置き換わる)。
+
+### バンドル外安全性 (Requirement 12)
+
+- [x] 素のバイナリの引数なし起動 → 案内メッセージ + exit 1
+- [x] 素のバイナリの通知要求 (`--title`/`--message`) → 案内メッセージ + exit 1
+- [x] 上記実行後にクラッシュレポートが生成されない (DiagnosticReportsのyobirin関連は修正前の既存2件のまま増加なし)
+
+### ブートストラップ (Requirement 11, 13)
+
+- [x] ダウンロード相当の場所の素バイナリから `install` が完走 (exit 0、`~/Applications/Yobirin.app` 置換 + symlink維持)
+- [x] symlink経由のtimeout通知が完走: `{"result":"timeout"}` + exit 0
+- [x] symlink経由の引数なし起動が孤児掃除経路で exit 0
+- [x] リリースワークフローが `swift test` 合格後にユニバーサルバイナリを添付する構成 (release.yml、v0.1.0の `yobirin-universal` アセットで実績確認)
+
+### `--profile` 配信 (Requirement 10, 11)
+
+- [x] `install --profile test --icon <PNG>` で `Yobirin-Test.app` (Bundle ID `com.mjun0812.yobirin.test`)・カスタムicns焼き込みを確認。symlinkはデフォルトを指したまま不変
+- [ ] `--profile test` の初回実行 → 独立した許可ダイアログ → 許可 → 指定アイコン・"Yobirin-Test" 名義で通知表示
+- [ ] 検証後のクリーンアップ: `Yobirin-Test.app` の削除とシステム設定 > 通知の項目整理
+
+備考: 検証中に発見・修正したバグ1件 — symlink経由起動がバンドル外と誤判定され通知系が案内+exit 1になるリグレッション (CFBundleが実行パスのsymlinkを解決しないため。実体パスへの再execで修正、commit a868bef。回帰テストを純粋関数3件 + プロセス結合1件追加済み)。
+
 ## 総括
 
 - 5.2〜5.5の全18項目pass (2026-07-27)
 - 検証中に発見・修正したバグ1件: 孤児通知掃除が非同期完了を待たずexitしていた (commit 28fb36a で修正、回帰テスト追加済み)
+- 8.2/9.2 (2026-07-28): 自動実施可能な8項目pass。残り2項目 (`--profile` 初回許可ダイアログ〜表示確認、クリーンアップ) はユーザー参加で実施予定。発見・修正したバグ1件: symlink起動の誤判定リグレッション (commit a868bef)
