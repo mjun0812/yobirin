@@ -31,11 +31,55 @@ $ yobirin --title "Deploy" --message "リリースを承認しますか?" --acti
 - **状態の可視化**：`yobirin list` がインストール状況を、`yobirin ps` が応答待ちのプロセスを一覧します
 - **なりすまさない**：通知は常にyobirin自身の名義で出します。システム設定から独立してオン/オフできます
 
-## なぜ作ったのか
+## ユースケース
 
-同じことをするツールは、ずっと前からあります。alerterです。機能面では申し分ありません。ただ、非推奨の `NSUserNotification` APIの上で、却下の検知を毎秒数回のポーリングで回しているため、通知を放置するとメモリが増え続けます (実測では48分で1.8GB)。修正PRは長くマージされないまま、現役の代替も見当たりませんでした。
+### 完了通知から次の動作へ
 
-yobirinは現行の `UserNotifications` frameworkだけを使い、却下をdelegateコールバック (`customDismissAction`) で受け取ります。ポーリングループがそもそも存在しないため、待機中は何も消費しません。
+長いビルドやテストの完了を知らせ、クリックされたらログを開きます。無視されたり閉じられたりしたら、何もせず終わります:
+
+```bash
+result=$(yobirin --title "ビルド完了" --message "ログを開きますか?" --timeout 300)
+case "$(echo "$result" | jq -r '.result')" in
+  clicked) open build.log ;;
+esac
+```
+
+### 承認してから実行する
+
+アクションボタンで確認を取り、承認されたときだけ先へ進みます:
+
+```bash
+answer=$(yobirin --title "Deploy" --message "本番へリリースしますか?" \
+  --action "承認" --action "却下" --timeout 600)
+if [ "$(echo "$answer" | jq -r '.action')" = "承認" ]; then
+  ./deploy.sh production
+fi
+```
+
+### coding agentのhookから指示を受け取る
+
+Claude CodeやCodexの通知hookに組み込むと、タスク完了の通知に返信して、そのまま次の指示を送れます。プロファイルを使えば、通知はagentのアイコンと名義で表示されます:
+
+```bash
+reply=$(yobirin --profile claude --title "Claude Code" \
+  --message "タスクが完了しました。続きの指示があれば返信してください" \
+  --reply --timeout 300)
+text=$(echo "$reply" | jq -r 'select(.result == "replied") | .text')
+[ -n "$text" ] && echo "$text" >> next-instructions.txt
+```
+
+### 中止の機会を与えてから自動実行する
+
+タイムアウトを「応答がなければ実行」の合図として使います。席にいれば止められて、いなければ予定どおり進みます:
+
+```bash
+result=$(yobirin --title "メンテナンス" --message "5分後にバックアップを開始します" \
+  --action "今すぐ開始" --action "中止" --timeout 300)
+case "$(echo "$result" | jq -r '.action // .result')" in
+  中止) exit 0 ;;
+  *) ./backup.sh ;;   # timeoutと「今すぐ開始」はどちらも実行へ
+esac
+```
 
 ## 動作要件
 
@@ -114,16 +158,6 @@ yobirin --title <文字列> --message <文字列>
 | 0         | ユーザーの応答またはタイムアウトを捕捉した | 結果JSON            |
 | 2         | 通知の許可が得られていない                 | なし (理由はstderr) |
 | その他非0 | 環境エラー (引数不正、添付の失敗など)      | なし                |
-
-スクリプトからは `jq -r '.result'` で分岐できます:
-
-```bash
-result=$(yobirin --title "ビルド完了" --message "ログを開きますか?" --timeout 300)
-case "$(echo "$result" | jq -r '.result')" in
-  clicked) open build.log ;;
-  timeout|dismissed) ;;
-esac
-```
 
 タイムアウトした通知は、通知センターから削除してから終了するので、応答されないまま残ることはありません。強制終了などで通知だけが残った場合も、引数なしで `yobirin` を起動すれば掃除されます。
 
