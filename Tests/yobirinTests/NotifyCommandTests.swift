@@ -22,6 +22,7 @@ final class NotifyCommandTests: XCTestCase {
 
         XCTAssertEqual(command.title, "hello")
         XCTAssertEqual(command.message, "body")
+        XCTAssertNil(command.profile)
         XCTAssertNil(command.subtitle)
         XCTAssertNil(command.group)
         XCTAssertNil(command.timeout)
@@ -37,6 +38,16 @@ final class NotifyCommandTests: XCTestCase {
     func testParsesSubtitle() throws {
         let command = try NotifyCommand.parse(["--title", "t", "--message", "m", "--subtitle", "sub"])
         XCTAssertEqual(command.subtitle, "sub")
+    }
+
+    func testParsesProfile() throws {
+        let command = try NotifyCommand.parse(["--title", "t", "--message", "m", "--profile", "claude"])
+        XCTAssertEqual(command.profile, "claude")
+    }
+
+    func testParsesWithoutProfileDefaultsToNil() throws {
+        let command = try NotifyCommand.parse(["--title", "t", "--message", "m"])
+        XCTAssertNil(command.profile)
     }
 
     func testParsesGroup() throws {

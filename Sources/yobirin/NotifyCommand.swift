@@ -15,6 +15,9 @@ struct NotifyCommand: ParsableCommand {
     @Option(help: "通知の本文")
     var message: String
 
+    @Option(help: "指定したプロファイルのバンドルへ切り替えて配信する")
+    var profile: String?
+
     @Option(help: "通知のサブタイトル")
     var subtitle: String?
 
@@ -69,7 +72,15 @@ struct NotifyCommand: ParsableCommand {
 
     /// 引数パース → 認可 → group置換 → category登録 → 配信 → 応答/タイマー → JSON出力 → 遅延exit
     /// の一連のフローを結線する (design.md System Flows、Requirements 3.6, 8.3)。
+    ///
+    /// `--profile` 指定時は、NSApplication・UN型に触れる前に対象バンドルのMach-Oへ
+    /// ディスパッチする (design.md フローに関する決定、Requirements 10.4, 10.5)。
     func run() throws {
+        if let profile {
+            ProfileDispatch.dispatch(profile: profile)
+            return
+        }
+
         let request = makeNotificationRequest()
         let client = UNNotificationCenterAdapter()
         let delegate = AppDelegate(
