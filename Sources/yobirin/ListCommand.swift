@@ -20,7 +20,7 @@ struct ListCommand: ParsableCommand {
     func run() {
         Self.perform(
             json: json,
-            homeDirectory: NSHomeDirectory(),
+            homeDirectory: ProfileNaming.resolvedHomeDirectory(),
             fileManager: .default,
             listDirectory: Self.defaultListDirectory,
             stdoutWriter: Self.defaultStdoutWriter,
@@ -99,7 +99,8 @@ struct ListCommand: ParsableCommand {
             case .profile(let name): profile = name
             }
 
-            let (bundleID, version) = readBundleInfo(bundlePath: itemPath, fileManager: fileManager)
+            let (bundleID, version) = BundleEnvironment.readBundleInfo(
+                bundlePath: itemPath, fileManager: fileManager)
             entries.append(Entry(profile: profile, bundleID: bundleID, version: version, path: itemPath))
         }
 
@@ -111,24 +112,6 @@ struct ListCommand: ParsableCommand {
             case (let l?, let r?): return l < r
             }
         }
-    }
-
-    /// 配置済み `Contents/Info.plist` から `CFBundleIdentifier` / `CFBundleShortVersionString` を
-    /// 読む (規約からの導出値ではなく実態を表示するため)。読めないキー・plist自体は個別に `nil`
-    /// (欠損) とし、他の項目の一覧表示を止めない (14.8)。
-    private static func readBundleInfo(bundlePath: String, fileManager: FileManager) -> (
-        bundleID: String?, version: String?
-    ) {
-        let plistPath = "\(bundlePath)/Contents/Info.plist"
-        guard let data = fileManager.contents(atPath: plistPath),
-            let plistObject = try? PropertyListSerialization.propertyList(from: data, format: nil),
-            let plist = plistObject as? [String: Any]
-        else {
-            return (nil, nil)
-        }
-        return (
-            plist["CFBundleIdentifier"] as? String, plist["CFBundleShortVersionString"] as? String
-        )
     }
 
     // MARK: - Text formatting (0件は案内メッセージ、それ以外はヘッダ付き桁揃え表)

@@ -12,6 +12,11 @@ struct ProfileNaming: Equatable {
     static let executableName = "yobirin"
     static let defaultBundleID = "com.mjun0812.yobirin"
 
+    /// バンドル配置のルートを上書きする環境変数名 (design.md「バンドル配置のルートは
+    /// `YOBIRIN_HOME` 環境変数で上書き可能」、task 13.1)。install / list / ps / ディスパッチの
+    /// ホーム解決はすべて `resolvedHomeDirectory` を経由し、この変数へ一元化する。
+    static let homeEnvironmentKey = "YOBIRIN_HOME"
+
     let appName: String
     let bundleID: String
     let bundlePath: String
@@ -19,6 +24,16 @@ struct ProfileNaming: Equatable {
 
     enum ValidationError: Error, Equatable {
         case invalidName(String)
+    }
+
+    /// ホームディレクトリ解決の単一ソース。`YOBIRIN_HOME` が設定されていればそれを使い、未設定
+    /// なら従来どおり `NSHomeDirectory()` を使う。`NSHomeDirectory()` は子プロセスの `HOME` を
+    /// 反映しない (実測) ため、結合テストは `YOBIRIN_HOME` でバンドル探索・配置先をテンポラリ
+    /// 領域へ密閉する。
+    static func resolvedHomeDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        environment[homeEnvironmentKey] ?? NSHomeDirectory()
     }
 
     /// プロファイル名の検証。`^[a-z0-9]+$` (英小文字・数字のみ、1文字以上)。
@@ -33,12 +48,12 @@ struct ProfileNaming: Equatable {
     }
 
     /// デフォルト (プロファイル指定なし) の導出。
-    static func `default`(homeDirectory: String = NSHomeDirectory()) -> ProfileNaming {
+    static func `default`(homeDirectory: String = resolvedHomeDirectory()) -> ProfileNaming {
         make(appName: "Yobirin", bundleID: defaultBundleID, homeDirectory: homeDirectory)
     }
 
     /// 指定プロファイルの導出。`name` は `^[a-z0-9]+$` を満たさなければならない。
-    static func forProfile(_ name: String, homeDirectory: String = NSHomeDirectory()) throws
+    static func forProfile(_ name: String, homeDirectory: String = resolvedHomeDirectory()) throws
         -> ProfileNaming
     {
         try validate(name)
@@ -52,7 +67,7 @@ struct ProfileNaming: Equatable {
 
     /// `profile` が nil ならデフォルト、非nilなら指定プロファイルを導出する
     /// (task 7.3のインストーラが共通して使う想定の窓口)。
-    static func resolve(profile: String?, homeDirectory: String = NSHomeDirectory()) throws
+    static func resolve(profile: String?, homeDirectory: String = resolvedHomeDirectory()) throws
         -> ProfileNaming
     {
         guard let profile else {
@@ -85,7 +100,7 @@ struct ProfileNaming: Equatable {
     /// 往復一致 (逆引きした名前から順方向導出したappNameが同じディレクトリ名になる) を要求する。
     /// `Yobirin-ABC.app` (順方向導出は `Yobirin-Abc`) や `Yobirin-My-App.app` (`my-app` は
     /// `validate` を通らない) のような規約外の名前は `nil` を返して棄却する。
-    static func recognize(appDirectoryName: String, homeDirectory: String = NSHomeDirectory())
+    static func recognize(appDirectoryName: String, homeDirectory: String = resolvedHomeDirectory())
         -> RecognizedBundle?
     {
         let suffix = ".app"
@@ -146,7 +161,7 @@ enum ProfileDispatch {
     static func dispatch(
         profile: String,
         arguments: [String] = CommandLine.arguments,
-        homeDirectory: String = NSHomeDirectory(),
+        homeDirectory: String = ProfileNaming.resolvedHomeDirectory(),
         isInstalled: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
         stderrWriter: (String) -> Void = Self.defaultStderrWriter,
         exit: (Int32) -> Void = { Darwin.exit($0) },

@@ -19,18 +19,15 @@ import XCTest
 ///   通知許可 (GUI) が必要なため自動テストできない (design.md「通知の表示・対話・権限フローは
 ///   自動テストできない」)。8.2 実機確認・9.2 手動検証チェックリストでカバーする。
 ///   バンドル内マトリクスの分岐ロジック自体は `LaunchGateTests` が純粋関数として検証済み。
-/// - install の非symlink実ファイル衝突・成功系を実プロセスで再現すること: `Installer.install`
-///   は `homeDirectory` 引数の既定値が `NSHomeDirectory()` であり、`InstallCommand` はこれを
-///   上書きするCLIオプションを持たない。かつ本マシン (Darwin, 直近のmacOS) では子プロセスの
-///   `HOME` 環境変数を差し替えても `NSHomeDirectory()` の戻り値は変わらないことを実機で確認済み
-///   (`getenv("HOME")` は差し替わるが `NSHomeDirectory()` は実ユーザーの実ホームを返し続ける)。
-///   そのため「非symlink衝突」「成功系」を実プロセスで再現すると、配置先が必ず実際の
-///   `~/Applications` になってしまい、実環境を汚さずに検証する方法がない。この2ケースは
-///   `InstallerTests` (fake注入によるテンポラリ領域での検証。
+/// - install の非symlink実ファイル衝突・成功系を実プロセスで再現すること: `Installer.install` の
+///   `homeDirectory` 引数は task 13.1 以降 `ProfileNaming.resolvedHomeDirectory()`
+///   (`YOBIRIN_HOME` 環境変数、未設定時は `NSHomeDirectory()`) を既定値とし、
+///   `environmentWithTemporaryHome` で渡す `YOBIRIN_HOME` によりテンポラリ領域へ密閉できるように
+///   なった (以前は `HOME` を差し替えても `NSHomeDirectory()` の戻り値が変わらず密閉不能だった)。
+///   ただしこの2ケースの実プロセス再現追加は本タスクの主眼 (ホーム解決の一元化とゲート判定拡張)
+///   の範囲外のため見送り、引き続き `InstallerTests` (fake注入によるテンポラリ領域での検証。
 ///   `testInstallFailsWhenExistingBinPathIsNonSymlinkFileAndLeavesItUntouched` /
-///   `testInstallCreatesSymlinkPointingToInstalledMachO` 等) のカバレッジに委ね、実プロセスでの
-///   再現はしない (Sourcesを変更してCLIにhomeDirectory上書きオプションを追加する手段は、本タスクの
-///   スコープ外のため取らない)。
+///   `testInstallCreatesSymlinkPointingToInstalledMachO` 等) のカバレッジに委ねる。
 /// - 署名失敗 (Requirement 11.6) を実プロセスで再現すること: 実 `codesign` を意図的に失敗させる
 ///   決定的な方法がなく、既に `InstallerTests.testInstallFailsWhenCodesignSigningFails` (fake
 ///   `runProcess` 注入) でカバー済みのため新規に無理な再現はしない。
@@ -98,16 +95,33 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
             stderr: String(data: stderrData, encoding: .utf8) ?? "")
     }
 
-    /// installを実プロセスで起動する際に使う環境。`HOME` / `YOBIRIN_BIN_DIR` をテンポラリ領域へ
-    /// 差し替える (実 `~/Applications` ・実 `~/.local/bin` を汚さないための防御的な措置)。ただし
-    /// 前述のとおり本マシンでは `NSHomeDirectory()` が `HOME` を反映しないため、このヘルパは
-    /// 「配置系のI/Oに到達する前に失敗するケース」でのみ安全に使う。
+    /// installを実プロセスで起動する際に使う環境。`HOME` / `YOBIRIN_BIN_DIR` に加え、task 13.1で
+    /// ホーム解決の単一ソースとなった `YOBIRIN_HOME` もテンポラリ領域へ差し替える (実
+    /// `~/Applications` ・実 `~/.local/bin` を汚さないための防御的な措置)。`NSHomeDirectory()` は
+    /// 子プロセスの `HOME` を反映しないため、依然として `HOME` 単体では密閉できない
+    /// (`getenv("HOME")` は差し替わるが `NSHomeDirectory()` は実ユーザーの実ホームを返し続ける) が、
+    /// `Installer.install` の `homeDirectory` 既定値は `ProfileNaming.resolvedHomeDirectory()`
+    /// 経由で `YOBIRIN_HOME` を直接読むため、この変数を渡す限り密閉が効く。
     private func environmentWithTemporaryHome(homeDirectory: String, binDirectory: String)
         -> [String: String]
     {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = homeDirectory
+        environment[ProfileNaming.homeEnvironmentKey] = homeDirectory
         environment[Installer.binDirectoryEnvironmentKey] = binDirectory
+        return environment
+    }
+
+    /// `list` / `ps` / 起動ゲートの実プロセステストへ `YOBIRIN_HOME` を渡し、実マシンの
+    /// インストール状態 (実 `~/Applications` の内容) から独立させる (design.md 起動ゲート
+    /// 「結合テストはこの変数でバンドル探索・配置先をテンポラリ領域へ密閉する」、task 13.1)。
+    /// 参照先ディレクトリは作成しない (`list`/`ps` は不存在を0件として扱い、起動ゲートは
+    /// デフォルトバンドル未インストールとして扱う)。
+    private func environmentWithIsolatedYobirinHome() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment[ProfileNaming.homeEnvironmentKey] =
+            FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-isolated-home-\(UUID().uuidString)").path
         return environment
     }
 
@@ -115,7 +129,12 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
     // (Requirements 12.1, 12.2, 12.3)
 
     func testOutsideBundleWithNoArgumentsGuidesInstallAndExitsNonZero() throws {
-        let result = try runYobirin(arguments: [])
+        // YOBIRIN_HOMEを空のテンポラリ領域へ密閉し、実マシンにデフォルトバンドルが導入済みで
+        // あっても「未インストール」として振る舞うことを保証する (task 13.1: 現状mainの
+        // バンドル存在判定は固定falseのため今はYOBIRIN_HOMEの値自体は無関係だが、task 13.2で
+        // 実配線されたあとも本テストが実マシンの状態に左右されないようにする)。
+        let result = try runYobirin(
+            arguments: [], environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertTrue(result.stdout.isEmpty)
@@ -123,7 +142,9 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
     }
 
     func testOutsideBundleWithNotificationArgumentsGuidesInstallAndExitsNonZero() throws {
-        let result = try runYobirin(arguments: ["--title", "t", "--message", "m"])
+        let result = try runYobirin(
+            arguments: ["--title", "t", "--message", "m"],
+            environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertTrue(result.stdout.isEmpty)
@@ -166,14 +187,16 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
     // 「通知APIに触れずクラッシュなく完走する」ことをexit 0・stderr空・出力形状のみで確認する。)
 
     func testOutsideBundleWithListCompletesWithoutTouchingNotificationAPI() throws {
-        let result = try runYobirin(arguments: ["list"])
+        let result = try runYobirin(
+            arguments: ["list"], environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
     func testOutsideBundleWithListJSONCompletesWithoutTouchingNotificationAPI() throws {
-        let result = try runYobirin(arguments: ["list", "--json"])
+        let result = try runYobirin(
+            arguments: ["list", "--json"], environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertTrue(result.stderr.isEmpty)
@@ -185,14 +208,16 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
     // 「通知APIに触れずクラッシュなく完走する」ことをexit 0・stderr空・出力形状のみで確認する。)
 
     func testOutsideBundleWithPsCompletesWithoutTouchingNotificationAPI() throws {
-        let result = try runYobirin(arguments: ["ps"])
+        let result = try runYobirin(
+            arguments: ["ps"], environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
     func testOutsideBundleWithPsJSONCompletesWithoutTouchingNotificationAPI() throws {
-        let result = try runYobirin(arguments: ["ps", "--json"])
+        let result = try runYobirin(
+            arguments: ["ps", "--json"], environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertTrue(result.stderr.isEmpty)
@@ -215,7 +240,9 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         try FileManager.default.createSymbolicLink(
             atPath: linkPath, withDestinationPath: Self.yobirinExecutablePath)
 
-        let result = try runYobirin(executablePath: linkPath, arguments: [])
+        let result = try runYobirin(
+            executablePath: linkPath, arguments: [],
+            environment: environmentWithIsolatedYobirinHome())
 
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertTrue(result.stderr.contains("yobirin install"))

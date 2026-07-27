@@ -17,7 +17,11 @@ enum YobirinMain {
         BundleEnvironment.reExecThroughSymlinkIfNeeded()
         let decision = LaunchGate.decide(
             arguments: CommandLine.arguments,
-            isOutsideBundle: BundleEnvironment.isOutsideBundle()
+            isOutsideBundle: BundleEnvironment.isOutsideBundle(),
+            // task 13.1 では純粋関数の拡張のみを行い、実際のバンドル存在判定の配線は
+            // task 13.2 で行う。ここを固定 `false` にしている限り `.execInstalledBundle` は
+            // 返らず、mainの挙動は本タスクで変化しない。
+            isDefaultBundleInstalled: false
         )
         switch decision {
         case .sweepOrphans:
@@ -27,6 +31,10 @@ enum YobirinMain {
         case .guideInstall:
             FileHandle.standardError.write(Data((installGuideMessage + "\n").utf8))
             exit(ResultEmitter.environmentErrorExitCode)
+        case .execInstalledBundle:
+            // 実配線 (execv引き継ぎ・バージョン不一致案内) はtask 13.2で行う。上記のとおり
+            // `isDefaultBundleInstalled: false` を渡しているため到達しない。
+            fatalError("execInstalledBundle handoff is wired in task 13.2")
         }
     }
 
@@ -46,16 +54,29 @@ enum LaunchGate {
         /// ArgumentParserのルーティングへ委ねる (バンドル内の通常起動、
         /// バンドル外のinstall/--help/-h/--version)
         case runCLI
-        /// バンドル外での通知系要求・引数なし起動 → インストール案内をstderrへ出し非0終了
-        /// (Requirements 12.2, 12.3。クラッシュしない)
+        /// バンドル外での通知系要求・引数なし起動、かつデフォルトバンドルが未インストール
+        /// → インストール案内をstderrへ出し非0終了 (Requirements 12.2, 12.3。クラッシュしない)
         case guideInstall
+        /// バンドル外での通知系要求・引数なし起動、かつデフォルトバンドルがインストール済み
+        /// → バンドル内Mach-Oへ実行を引き継ぐ (Requirements 17.1, 17.2)。実際のexec配線・
+        /// バージョン不一致案内は task 13.2 が行う。
+        case execInstalledBundle
     }
 
-    static func decide(arguments: [String], isOutsideBundle: Bool) -> Decision {
+    /// - Parameter isDefaultBundleInstalled: デフォルトバンドルのMach-Oが存在するか
+    ///   (Requirement 17.1, 17.2)。バンドル外で通知系要求・引数なし起動のときのみ参照する。
+    static func decide(
+        arguments: [String],
+        isOutsideBundle: Bool,
+        isDefaultBundleInstalled: Bool = false
+    ) -> Decision {
         guard isOutsideBundle else {
             return LaunchGuard.isArgumentlessLaunch(arguments) ? .sweepOrphans : .runCLI
         }
-        return isRoutableOutsideBundle(arguments) ? .runCLI : .guideInstall
+        if isRoutableOutsideBundle(arguments) {
+            return .runCLI
+        }
+        return isDefaultBundleInstalled ? .execInstalledBundle : .guideInstall
     }
 
     /// バンドル外で継続してよいコマンド種別か (Requirement 12.1: インストール系とヘルプは
@@ -70,6 +91,31 @@ enum LaunchGate {
             return true
         }
         return ["install", "list", "ps"].contains(rest.first { !$0.hasPrefix("-") })
+    }
+}
+
+/// 引き継ぎ先バンドルとのバージョン比較 (design.md 透過ディスパッチの詳細、Requirement 17.4)。
+/// バンドルのInfo.plist (`CFBundleShortVersionString`) と自身の `YobirinVersion.current` を
+/// 比較し、一致すれば無言 (`nil`)、不一致なら更新案内の文言を返す純粋関数。stdoutを汚さないため
+/// (17.4)、呼び出し側がこの文言をstderrへ書く。Info.plistの読み取りは `ListCommand` と共有する
+/// `BundleEnvironment.readBundleInfo` を使い、実装を重複させない。
+enum BundleVersionCheck {
+    static func updateNotice(
+        bundlePath: String,
+        currentVersion: String = YobirinVersion.current,
+        fileManager: FileManager = .default
+    ) -> String? {
+        guard
+            let installedVersion = BundleEnvironment.readBundleInfo(
+                bundlePath: bundlePath, fileManager: fileManager
+            ).version,
+            installedVersion != currentVersion
+        else {
+            return nil
+        }
+        return
+            "note: installed bundle is \(installedVersion) but this binary is \(currentVersion); "
+            + "run 'yobirin install' to update"
     }
 }
 

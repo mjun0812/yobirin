@@ -132,4 +132,81 @@ final class LaunchGateTests: XCTestCase {
             LaunchGate.decide(arguments: ["/path/to/yobirin", "notify", "--help"], isOutsideBundle: true),
             .runCLI)
     }
+
+    // MARK: - Outside bundle × notification/no-args × default bundle installed (Requirements 17.1, 17.2, 17.3)
+
+    func testOutsideBundleWithNoArgumentsAndBundleInstalledExecsInstalledBundle() {
+        XCTAssertEqual(
+            LaunchGate.decide(arguments: [], isOutsideBundle: true, isDefaultBundleInstalled: true),
+            .execInstalledBundle)
+    }
+
+    func testOutsideBundleWithNotificationArgumentsAndBundleInstalledExecsInstalledBundle() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"],
+                isOutsideBundle: true, isDefaultBundleInstalled: true),
+            .execInstalledBundle)
+    }
+
+    func testOutsideBundleWithNoArgumentsAndBundleNotInstalledGuidesInstall() {
+        XCTAssertEqual(
+            LaunchGate.decide(arguments: [], isOutsideBundle: true, isDefaultBundleInstalled: false),
+            .guideInstall)
+    }
+
+    func testOutsideBundleWithNotificationArgumentsAndBundleNotInstalledGuidesInstall() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"],
+                isOutsideBundle: true, isDefaultBundleInstalled: false),
+            .guideInstall)
+    }
+
+    func testOmittingBundleInstalledParameterDefaultsToNotInstalledGuidesInstall() {
+        // 既存呼び出し (パラメータ省略) は従来どおりの案内挙動を保つ。
+        XCTAssertEqual(LaunchGate.decide(arguments: [], isOutsideBundle: true), .guideInstall)
+    }
+
+    // MARK: - Outside bundle × install/list/ps/--help/--version are unaffected by bundle install state (Requirement 17.6)
+
+    func testOutsideBundleWithInstallRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "install"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
+
+    func testOutsideBundleWithListRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "list"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
+
+    func testOutsideBundleWithPsRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
+
+    func testOutsideBundleWithHelpRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "--help"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
+
+    func testOutsideBundleWithVersionRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "--version"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
 }

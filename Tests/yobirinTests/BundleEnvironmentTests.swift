@@ -56,6 +56,36 @@ final class BundleEnvironmentTests: XCTestCase {
         )
     }
 
+    // MARK: - readBundleInfo (ListCommandとBundleVersionCheckが共有する読み取り経路、Requirements 14.2, 17.4)
+
+    func testReadBundleInfoReturnsBundleIDAndVersionFromInfoPlist() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-bundle-info-tests-\(UUID().uuidString)")
+        let contentsDir = tempDir.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contentsDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": "com.mjun0812.yobirin",
+            "CFBundleShortVersionString": "0.4.1",
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contentsDir.appendingPathComponent("Info.plist"))
+
+        let info = BundleEnvironment.readBundleInfo(bundlePath: tempDir.path)
+
+        XCTAssertEqual(info.bundleID, "com.mjun0812.yobirin")
+        XCTAssertEqual(info.version, "0.4.1")
+    }
+
+    func testReadBundleInfoReturnsNilForBothWhenInfoPlistIsMissing() {
+        let info = BundleEnvironment.readBundleInfo(bundlePath: "/nonexistent/Yobirin.app")
+
+        XCTAssertNil(info.bundleID)
+        XCTAssertNil(info.version)
+    }
+
     func testIsOutsideBundleDefaultArgumentReadsBundleMainBundleIdentifier() {
         // 既定引数が実際の `Bundle.main.bundleIdentifier` に委譲していることを検証する。
         // xctestホストプロセス自体が独自のbundleIdentifier ("com.apple.dt.xctest.tool") を

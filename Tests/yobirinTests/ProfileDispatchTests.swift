@@ -42,6 +42,22 @@ final class ProfileDispatchTests: XCTestCase {
         XCTAssertEqual(naming.appName, "Yobirin-Codex")
     }
 
+    // MARK: - ProfileNaming.resolvedHomeDirectory (YOBIRIN_HOME環境変数への一元化, task 13.1)
+
+    func testHomeEnvironmentKeyIsYobirinHome() {
+        XCTAssertEqual(ProfileNaming.homeEnvironmentKey, "YOBIRIN_HOME")
+    }
+
+    func testResolvedHomeDirectoryUsesYobirinHomeWhenSet() {
+        XCTAssertEqual(
+            ProfileNaming.resolvedHomeDirectory(environment: ["YOBIRIN_HOME": "/tmp/yobirin-home"]),
+            "/tmp/yobirin-home")
+    }
+
+    func testResolvedHomeDirectoryFallsBackToNSHomeDirectoryWhenUnset() {
+        XCTAssertEqual(ProfileNaming.resolvedHomeDirectory(environment: [:]), NSHomeDirectory())
+    }
+
     // MARK: - ProfileNaming: validation (^[a-z0-9]+$)
 
     func testForProfileAcceptsLowercaseAlphanumeric() throws {

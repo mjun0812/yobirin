@@ -22,7 +22,7 @@ struct PsCommand: ParsableCommand {
             json: json,
             currentPID: getpid(),
             now: Date(),
-            homeDirectory: NSHomeDirectory(),
+            homeDirectory: ProfileNaming.resolvedHomeDirectory(),
             scan: Self.defaultScan,
             stdoutWriter: Self.defaultStdoutWriter,
             stderrWriter: Self.defaultStderrWriter,

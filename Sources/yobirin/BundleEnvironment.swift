@@ -52,4 +52,24 @@ enum BundleEnvironment {
         arguments[0] = target
         ProfileDispatch.defaultExec(target, arguments)
     }
+
+    /// 配置済みバンドルの `Contents/Info.plist` から `CFBundleIdentifier` /
+    /// `CFBundleShortVersionString` を読む (design.md ListCommand責務 / 透過ディスパッチの
+    /// バージョン比較、Requirements 14.2, 17.4)。`ListCommand` と `BundleVersionCheck`
+    /// (Yobirin.swift) が共有する唯一の読み取り経路。読めないキー・plist自体は個別に `nil`
+    /// (欠損) とし、呼び出し側の一覧表示・バージョン比較を止めない。
+    static func readBundleInfo(bundlePath: String, fileManager: FileManager = .default) -> (
+        bundleID: String?, version: String?
+    ) {
+        let plistPath = "\(bundlePath)/Contents/Info.plist"
+        guard let data = fileManager.contents(atPath: plistPath),
+            let plistObject = try? PropertyListSerialization.propertyList(from: data, format: nil),
+            let plist = plistObject as? [String: Any]
+        else {
+            return (nil, nil)
+        }
+        return (
+            plist["CFBundleIdentifier"] as? String, plist["CFBundleShortVersionString"] as? String
+        )
+    }
 }

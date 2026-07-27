@@ -71,7 +71,7 @@ enum Installer {
     static func install(
         profile: String? = nil,
         iconPath: String? = nil,
-        homeDirectory: String = NSHomeDirectory(),
+        homeDirectory: String = ProfileNaming.resolvedHomeDirectory(),
         binDirectory: String? = nil,
         fileManager: FileManager = .default,
         resolveSelfExecutablePath: () -> String? = Self.defaultResolveSelfExecutablePath,
