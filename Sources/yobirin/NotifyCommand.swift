@@ -9,48 +9,50 @@ import Foundation
 struct NotifyCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "notify")
 
-    @Option(help: "通知のタイトル")
+    @Option(help: "The notification title")
     var title: String
 
-    @Option(help: "通知の本文")
+    @Option(help: "The notification body")
     var message: String
 
-    @Option(help: "指定したプロファイルのバンドルへ切り替えて配信する")
+    @Option(help: "Deliver via the bundle of the specified profile")
     var profile: String?
 
-    @Option(help: "通知のサブタイトル")
+    @Option(help: "The notification subtitle")
     var subtitle: String?
 
-    @Option(help: "同一identifierの既存通知を置き換えるグループ")
+    @Option(help: "Group ID; replaces an existing notification with the same group")
     var group: String?
 
-    @Option(help: "応答を待つ秒数 (省略時は無期限)。正の数値のみ許容", transform: Self.parseTimeout)
+    @Option(
+        help: "Seconds to wait for a response (waits forever when omitted); positive numbers only",
+        transform: Self.parseTimeout)
     var timeout: Double?
 
-    @Option(help: "アクションボタンのラベル (複数指定可)")
+    @Option(help: "Action button label (repeatable)")
     var action: [String] = []
 
-    @Flag(help: "reply入力欄を有効にする")
+    @Flag(help: "Enable the text reply field")
     var reply = false
 
-    @Option(help: "replyのplaceholderテキスト (--replyと併用)")
+    @Option(help: "Placeholder text for the reply field (requires --reply)")
     var replyPlaceholder: String?
 
-    @Option(help: "通知音 (default または名前)")
+    @Option(help: "Notification sound ('default' or a sound name)")
     var sound: String?
 
-    @Option(help: "添付する画像のパス")
+    @Option(help: "Path of an image to attach")
     var image: String?
 
     mutating func validate() throws {
         if replyPlaceholder != nil, !reply {
-            throw ValidationError("--reply-placeholder には --reply の指定が必要です")
+            throw ValidationError("--reply-placeholder requires --reply")
         }
     }
 
     private static func parseTimeout(_ value: String) throws -> Double {
         guard let seconds = Double(value), seconds > 0 else {
-            throw ValidationError("--timeout には正の数値を指定してください")
+            throw ValidationError("--timeout must be a positive number")
         }
         return seconds
     }

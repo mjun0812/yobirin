@@ -137,7 +137,7 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         let result = try runYobirin(arguments: ["install", "--help"])
 
         XCTAssertEqual(result.exitCode, 0)
-        XCTAssertTrue(result.stdout.contains("Yobirin.appを組み立ててインストールする"))
+        XCTAssertTrue(result.stdout.contains("Assemble and install Yobirin.app"))
         XCTAssertTrue(result.stderr.isEmpty)
     }
 

@@ -42,18 +42,18 @@ final class AppFlow: @unchecked Sendable {
     /// 開始する (Requirements 5.3, 5.4)。
     private func handleAuthorization(granted: Bool, error: Error?, request: NotificationRequest) {
         if let error {
-            onOutput(ResultEmitter.forPermissionDenied(reason: "通知の許可を取得できませんでした: \(error)"))
+            onOutput(ResultEmitter.forPermissionDenied(reason: "Failed to obtain notification permission: \(error)"))
             return
         }
         guard granted else {
-            onOutput(ResultEmitter.forPermissionDenied(reason: "通知が許可されていません"))
+            onOutput(ResultEmitter.forPermissionDenied(reason: "Notifications are not permitted"))
             return
         }
 
         do {
             try session.deliver(request)
         } catch {
-            onOutput(ResultEmitter.forEnvironmentError("通知の配信に失敗しました: \(error)"))
+            onOutput(ResultEmitter.forEnvironmentError("Failed to deliver the notification: \(error)"))
             return
         }
 

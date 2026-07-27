@@ -11,10 +11,10 @@ import Foundation
 struct PsCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ps",
-        abstract: "通知の結果を待機しているyobirinプロセスを一覧表示する"
+        abstract: "List yobirin processes waiting for a notification result"
     )
 
-    @Flag(help: "一覧を機械可読なJSONとしてstdoutへ出力する")
+    @Flag(help: "Print the list as machine-readable JSON to stdout")
     var json = false
 
     func run() {
@@ -69,7 +69,7 @@ struct PsCommand: ParsableCommand {
         do {
             records = try scan()
         } catch {
-            stderrWriter("プロセスの走査に失敗しました: \(error)")
+            stderrWriter("Failed to scan processes: \(error)")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         }
@@ -190,7 +190,7 @@ struct PsCommand: ParsableCommand {
 
     private static func textString(for entries: [Entry]) -> String {
         guard !entries.isEmpty else {
-            return "通知の結果を待機しているプロセスはありません"
+            return "No processes are waiting for a notification result"
         }
 
         let header = (

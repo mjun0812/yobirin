@@ -154,13 +154,13 @@ enum ProfileDispatch {
     ) {
         guard let naming = try? ProfileNaming.forProfile(profile, homeDirectory: homeDirectory)
         else {
-            stderrWriter("不正なプロファイル名です: \"\(profile)\" (使用できるのは英小文字と数字のみ)")
+            stderrWriter("Invalid profile name: \"\(profile)\" (only lowercase letters and digits are allowed)")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         }
 
         guard isInstalled(naming.machOPath) else {
-            stderrWriter("プロファイル \"\(profile)\" はインストールされていません: \(naming.bundlePath)")
+            stderrWriter("Profile \"\(profile)\" is not installed: \(naming.bundlePath)")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         }
@@ -168,7 +168,7 @@ enum ProfileDispatch {
         exec(naming.machOPath, buildExecArguments(machOPath: naming.machOPath, arguments: arguments))
 
         // execvはプロセス置換に成功すると返らない。ここに到達するのは失敗時のみ。
-        stderrWriter("プロファイル \"\(profile)\" の起動に失敗しました: \(String(cString: strerror(errno)))")
+        stderrWriter("Failed to launch profile \"\(profile)\": \(String(cString: strerror(errno)))")
         exit(ResultEmitter.environmentErrorExitCode)
     }
 

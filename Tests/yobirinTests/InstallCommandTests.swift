@@ -200,7 +200,7 @@ final class InstallCommandTests: XCTestCase {
         )
 
         XCTAssertEqual(stdoutMessages.count, 1)
-        XCTAssertFalse(stdoutMessages.contains { $0.contains("ログアウト") })
+        XCTAssertFalse(stdoutMessages.contains { $0.contains("log out") })
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
     }
@@ -222,7 +222,7 @@ final class InstallCommandTests: XCTestCase {
         )
 
         XCTAssertEqual(stdoutMessages.count, 1)
-        XCTAssertFalse(stdoutMessages.contains { $0.contains("ログアウト") })
+        XCTAssertFalse(stdoutMessages.contains { $0.contains("log out") })
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
     }
@@ -245,8 +245,8 @@ final class InstallCommandTests: XCTestCase {
 
         // 16.1: 案内は完了メッセージに続けて (順序どおりに) 出ること。
         XCTAssertEqual(stdoutMessages.count, 2)
-        XCTAssertTrue(stdoutMessages[0].contains("インストールが完了しました"))
-        XCTAssertTrue(stdoutMessages[1].contains("ログアウト"))
+        XCTAssertTrue(stdoutMessages[0].contains("Installation complete"))
+        XCTAssertTrue(stdoutMessages[1].contains("log out"))
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
     }
@@ -271,8 +271,8 @@ final class InstallCommandTests: XCTestCase {
 
         // 16.1: 案内は完了メッセージに続けて (順序どおりに) 出ること。
         XCTAssertEqual(stdoutMessages.count, 2)
-        XCTAssertTrue(stdoutMessages[0].contains("インストールが完了しました"))
-        XCTAssertTrue(stdoutMessages[1].contains("ログアウト"))
+        XCTAssertTrue(stdoutMessages[0].contains("Installation complete"))
+        XCTAssertTrue(stdoutMessages[1].contains("log out"))
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
     }

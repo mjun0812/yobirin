@@ -31,7 +31,7 @@ enum YobirinMain {
     }
 
     private static let installGuideMessage =
-        ".appバンドル外で実行されています。yobirin install でインストールしてください"
+        "Running outside the .app bundle. Run 'yobirin install' to install."
 }
 
 /// 起動ゲートの判定 (design.md 起動ゲートとインストールのフロー、

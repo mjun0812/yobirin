@@ -10,17 +10,19 @@ import Foundation
 struct InstallCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "install",
-        abstract: "Yobirin.appを組み立ててインストールする"
+        abstract: "Assemble and install Yobirin.app"
     )
 
     /// `Installer.install` 呼び出しを差し替え可能にする関数型 (テスト容易性のための注入点)。
     typealias InstallFunction = (_ profile: String?, _ iconPath: String?) throws ->
         Installer.InstallOutcome
 
-    @Option(help: "導入するプロファイル名 (英小文字・数字のみ。省略時はデフォルト)")
+    @Option(
+        help: "Profile name to install (lowercase letters and digits only; installs the default bundle when omitted)"
+    )
     var profile: String?
 
-    @Option(help: "焼き込むアイコン画像のパス (省略時は同梱の標準アイコン)")
+    @Option(help: "Path of a PNG icon to embed (uses the bundled default icon when omitted)")
     var icon: String?
 
     func run() {
@@ -50,7 +52,7 @@ struct InstallCommand: ParsableCommand {
                 try ProfileNaming.validate(profile)
             } catch {
                 stderrWriter(
-                    "不正なプロファイル名です: \"\(profile)\" (使用できるのは英小文字と数字のみ)")
+                    "Invalid profile name: \"\(profile)\" (only lowercase letters and digits are allowed)")
                 exit(ResultEmitter.environmentErrorExitCode)
                 return
             }
@@ -60,26 +62,26 @@ struct InstallCommand: ParsableCommand {
         do {
             outcome = try install(profile, icon)
         } catch let error as Installer.InstallError {
-            stderrWriter(error.errorDescription ?? "インストールに失敗しました")
+            stderrWriter(error.errorDescription ?? "Installation failed")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         } catch {
-            stderrWriter("インストールに失敗しました: \(error)")
+            stderrWriter("Installation failed: \(error)")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         }
 
         if let naming = try? ProfileNaming.resolve(profile: profile) {
-            stdoutWriter("インストールが完了しました: \(naming.bundlePath)")
+            stdoutWriter("Installation complete: \(naming.bundlePath)")
         } else {
-            stdoutWriter("インストールが完了しました")
+            stdoutWriter("Installation complete")
         }
 
         // アイコン変更時の反映遅延の案内 (Requirement 16): 既存バンドルを置き換え、かつ
         // アイコンが変化したときだけ出す。案内の有無は成否・終了コードに影響しない (16.5)。
         if outcome.replacedExistingBundle && outcome.iconChanged {
             stdoutWriter(
-                "アイコンの変更を通知バナーへ反映するにはログアウト→ログインが必要です (新しいプロファイル名でインストールした場合は即時反映されます)"
+                "Icon changes appear in notification banners only after you log out and back in (installing under a new profile name shows the new icon immediately)"
             )
         }
     }

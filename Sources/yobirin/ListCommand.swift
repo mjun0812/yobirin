@@ -11,10 +11,10 @@ import Foundation
 struct ListCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
-        abstract: "インストール済みのバンドル (デフォルトとプロファイル) を一覧表示する"
+        abstract: "List installed bundles (default and profiles)"
     )
 
-    @Flag(help: "一覧を機械可読なJSONとしてstdoutへ出力する")
+    @Flag(help: "Print the list as machine-readable JSON to stdout")
     var json = false
 
     func run() {
@@ -55,7 +55,7 @@ struct ListCommand: ParsableCommand {
             entries = try scan(
                 homeDirectory: homeDirectory, fileManager: fileManager, listDirectory: listDirectory)
         } catch {
-            stderrWriter("配置先ディレクトリの走査に失敗しました: \(error)")
+            stderrWriter("Failed to scan the install directory: \(error)")
             exit(ResultEmitter.environmentErrorExitCode)
             return
         }
@@ -135,7 +135,7 @@ struct ListCommand: ParsableCommand {
 
     private static func textString(for entries: [Entry]) -> String {
         guard !entries.isEmpty else {
-            return "インストール済みのバンドルはありません (yobirin install でインストールできます)"
+            return "No installed bundles (run 'yobirin install' to install)"
         }
 
         let header = (profile: "PROFILE", bundleID: "BUNDLE ID", version: "VERSION", path: "PATH")

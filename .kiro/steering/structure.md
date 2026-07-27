@@ -40,7 +40,8 @@
 - **依存方向**: コマンド (CLI層) → 部品 (Installer / ProfileNaming / ResultEmitter)。部品同士は疎。終了コードは `ResultEmitter` の定数を参照し、magic numberを書かない
 - **注入パターン**: 副作用 (FileManager・Process実行・exec・exit・stdout/stderr) はクロージャ注入可能な `perform(...)` 静的関数に分離し、テストはfake注入 + テンポラリ領域で完結させる (実 `~/Applications` / 実 `~/.local/bin` に触れない)
 - **純粋関数化**: 判定ロジック (起動ゲートの `LaunchGate.decide`、`BundleEnvironment.reExecTarget` 等) は入出力だけの純粋関数として切り出し、配線 (`@main` 側) は薄く保つ
-- **コメント・メッセージは日本語**、括弧は半角。設計根拠はdesign.md / 実測記録はresearch.mdへの参照で示す
+- **コードコメントは日本語** (括弧は半角)。設計根拠はdesign.md / 実測記録はresearch.mdへの参照で示す
+- **CLIの出力メッセージ・ヘルプは英語** (OSS公開向け、2026-07-28決定)。エラー・案内・完了メッセージ・abstract/helpすべてが対象。JSONのキーは従来どおり英語
 - **フォーマット**: swift-format (`swift format lint --strict`)。コミット時にprekフックが実行される
 
 ---

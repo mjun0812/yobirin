@@ -36,17 +36,17 @@ enum Installer {
         var errorDescription: String? {
             switch self {
             case .iconUnreadable(let path):
-                return "アイコンを読み込めません: \(path)"
+                return "Cannot read icon: \(path)"
             case .selfExecutableUnresolvable:
-                return "実行中の自分自身のバイナリパスを解決できませんでした"
+                return "Could not resolve the path of the running executable"
             case .codesignFailed(let exitCode):
-                return "codesignによる署名に失敗しました (exit code: \(exitCode))"
+                return "codesign failed (exit code: \(exitCode))"
             case .invalidInstallDestination(let expected, let actual):
-                return "配置先が想定外です (expected: \(expected), actual: \(actual))"
+                return "Unexpected install destination (expected: \(expected), actual: \(actual))"
             case .existingLinkIsNotSymlink(let path):
-                return "\(path) はsymlinkではない実ファイルのため上書きを中断しました"
+                return "\(path) exists and is not a symlink; aborting without overwriting"
             case .verificationFailed(let reason):
-                return "配置後の検証に失敗しました: \(reason)"
+                return "Post-install verification failed: \(reason)"
             }
         }
     }
@@ -190,12 +190,12 @@ enum Installer {
             "/usr/bin/codesign", ["--verify", "--deep", "--strict", naming.bundlePath])
         guard verifyExitCode == 0 else {
             throw InstallError.verificationFailed(
-                "codesign --verify --deep --strict がexit code \(verifyExitCode) で終了しました")
+                "codesign --verify --deep --strict exited with code \(verifyExitCode)")
         }
         let helpExitCode = runProcess(naming.machOPath, ["--help"])
         guard helpExitCode == 0 else {
             throw InstallError.verificationFailed(
-                "配置済みコマンドの --help 実行がexit code \(helpExitCode) で終了しました")
+                "Running --help on the installed command exited with code \(helpExitCode)")
         }
 
         return InstallOutcome(replacedExistingBundle: bundleExisted, iconChanged: iconChanged)
