@@ -4,7 +4,7 @@ import Foundation
 /// バンドルへ埋め込むバージョン文字列 (design.md Installer責務)。
 /// 旧 `scripts/build-app.sh` の `YOBIRIN_VERSION` 既定値 (0.1.0) を単一定数として引き継ぐ。
 enum YobirinVersion {
-    static let current = "0.1.0"
+    static let current = "0.2.0"
 }
 
 /// CLI自身によるバンドル組み立て・署名・配置・起動検証 (design.md Components and Interfaces >
