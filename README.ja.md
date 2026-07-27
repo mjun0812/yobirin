@@ -15,7 +15,7 @@
 
 <p align="center"><a href="README.md">English README is here</a></p>
 
-通知を出すだけなら `osascript` でもできます。見えないのはその先です。通知はクリックされたのか、閉じられたのか、どのボタンが押され、何が入力されたのか。yobirinは通知を1件配信し、その反応を同期的に待って、結果をJSONとしてstdoutへ返して終了します。シェルスクリプトやツールのhookが、通知への反応で分岐できるようになります。
+yobirinは、macOSの通知を1件配信し、ユーザーの反応 (クリック、却下、アクションボタン、テキスト返信、タイムアウト) を待って、結果をJSONでstdoutへ出力するCLIです。シェルスクリプトやツールのhookから、通知への反応で処理を分岐できます。
 
 ```console
 $ yobirin --title "Deploy" --message "リリースを承認しますか?" --action "承認" --action "却下" --timeout 60
