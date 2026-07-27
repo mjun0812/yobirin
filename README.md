@@ -107,6 +107,15 @@ esac
 
 On timeout, the delivered notification is removed from Notification Center before yobirin exits, so no stale notification is left behind. Launching `yobirin` with no arguments quietly sweeps orphaned notifications (left over after a force-killed process) and exits.
 
+`yobirin ps` lists the processes still waiting for a notification result — useful for spotting forgotten notifications launched without `--timeout`. Add `--json` for machine-readable output:
+
+```console
+$ yobirin ps
+PID    PROFILE    TITLE   TIMEOUT  ELAPSED
+4211   (default)  Deploy  300      42s
+4300   claude     Done    -        12m30s
+```
+
 ## Icon profiles
 
 The notification icon is fixed to the app bundle's icon (a macOS restriction; there is no per-notification icon option). To use different icons per purpose, install derivative bundles that differ only in icon and bundle ID:
