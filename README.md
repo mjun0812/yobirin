@@ -7,7 +7,7 @@
 <p align="center"><b>yobirin</b> (呼び鈴, "call bell") is a macOS notification CLI that rings and waits for your response.</p>
 
 <p align="center">
-  <a href="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml"><img src="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml/badge.svg" alt="CI" height="20" /></a>
+  <a href="https://github.com/mjun0812/yobirin/actions/workflows/ci.yml"><img src="https://shieldcn.dev/github/mjun0812/yobirin/ci.svg?size=xs" alt="CI" height="20" /></a>
   <img src="https://shieldcn.dev/badge/platform-macOS-gray.svg?size=xs" alt="Platform: macOS" height="20" />
   <img src="https://shieldcn.dev/badge/Swift-6.0-orange.svg?size=xs" alt="Swift 6.0" height="20" />
   <a href="LICENSE"><img src="https://shieldcn.dev/badge/license-MIT-blue.svg?size=xs" alt="License: MIT" height="20" /></a>
@@ -92,7 +92,7 @@ esac
 Download the prebuilt binary and let it install itself:
 
 ```console
-$ gh release download --repo mjun0812/yobirin --pattern yobirin
+$ curl -fsSL -o yobirin https://github.com/mjun0812/yobirin/releases/latest/download/yobirin
 $ chmod +x yobirin
 $ ./yobirin install
 ```
