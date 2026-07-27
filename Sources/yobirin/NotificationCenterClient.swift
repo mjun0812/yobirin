@@ -14,10 +14,14 @@ protocol NotificationCenterClient {
     func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void)
 }
 
-/// 実センターへの薄い橋渡し。`UNUserNotificationCenter.current()` はバンドル外で例外死するため
+/// 実センターへの薄い橋渡し。`center` は算出プロパティとして遅延評価するため、型の参照や
+/// インスタンス化だけではバンドル外でも例外死しない (Requirement 12.1)。ただしメソッド呼び出し
+/// 自体は `UNUserNotificationCenter.current()` へ到達しバンドル内実行を前提とするため、
 /// swift testでは使えず、実配線とスモーク確認は task 3.1/4.1 の範囲とする。
 final class UNNotificationCenterAdapter: NotificationCenterClient {
-    private let center = UNUserNotificationCenter.current()
+    // `.current()` は毎回呼んでもシングルトン取得でしかなくコストは無視できるため、
+    // `lazy var` ではなく computed property で遅延評価する (design.md NotificationCenterClient)。
+    private var center: UNUserNotificationCenter { .current() }
 
     func requestAuthorization(completionHandler: @escaping @Sendable (Bool, Error?) -> Void) {
         center.requestAuthorization(options: [.alert, .sound], completionHandler: completionHandler)
