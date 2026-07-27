@@ -51,6 +51,7 @@ PATH上のsymlink → ~/Applications/Yobirin.app/Contents/MacOS/yobirin (直接�
 6. **`NSApplication.run()` + AppDelegate方式で起動する**。`RunLoop.main.run()` だけでは `applicationDidFinishLaunching` が来ず通知許可が取れない。
 7. **通知許可の拒否は `granted == false` ではなく `UNErrorDomain Code=1` のエラーで返る**。error分岐と `granted == false` 分岐の両方で `exit 2` にする。
 8. **制限付きentitlementを付けない**。ad-hoc署名で `com.apple.developer.usernotifications.communication` 等を主張すると、アプリが起動すらできなくなる (`Launchd job spawn failed`)。
+9. **CFBundleは実行パスのsymlinkを解決しない**。PATH上のsymlink経由のexecでは、バンドル内実体を指していても `Bundle.main.bundleIdentifier` がnilになる (UN層のLaunchServicesはrealpathで解決するため通知自体は出せる)。起動フローの最初で「バンドル未解決 かつ 実行パス≠realpath」を検知したら実体パスへ再execし、直接実行と同一条件に正規化する (2026-07-28実測)。
 
 ### 採用しない手段 (方針として禁止)
 
@@ -62,14 +63,22 @@ PATH上のsymlink → ~/Applications/Yobirin.app/Contents/MacOS/yobirin (直接�
 
 - **却下検知は `UNNotificationCategory` の `customDismissAction`** を使う。ポーリングは使わない (alerterのメモリリークの根本原因がポーリング実装だった)。
 - **`--timeout` 省略時は無期限**。呼び出し側 (hook等) が必ず明示指定する運用。許可ダイアログ表示中はタイムアウトが進まない。
-- **アイコンはビルド時にバンドルへ焼き込む**。複数アイコンが必要な場合はプロファイルごとに別バンドルを用意する。
+- **アイコンはインストール時にバンドルへ焼き込む** (icnsはImageIOで生成。各サイズにDPIメタデータ 1x=72/2x=144 が必須 — 欠くとRetinaスロットが無言で落ちる)。複数アイコンが必要な場合はプロファイルごとに別バンドルを用意し、`--profile <name>` で選択する。
 - **CLI・JSON出力はalerter互換にしない**。ゼロから設計する。
+- **コマンドは通知系とインストール系の2群に分類する**。インストール系 (`install` / `list` / ヘルプ) は通知API (UserNotifications / AppKit) の型に一切触れず、素のバイナリで完走する。命名規約 (バンドル名・Bundle ID・パス導出) は単一ソース (`ProfileNaming`) に集約する。
 
 ## Testing
 
 **通知の表示・対話・権限フローは自動テストできない** (GUI依存)。人間が画面を見てクリックする必要がある。
 
-- 自動テスト可能: 引数パース、JSON生成、group置換ロジック、終了コード
+- 自動テスト可能: 引数パース、JSON生成、group置換ロジック、終了コード、インストール系の組み立て・配置・一覧 (fake注入のテンポラリ領域テスト)、起動ゲート (ビルド済み実バイナリのプロセス起動による結合テスト)
 - 手動確認が必須: 通知の表示、アイコン、クリック / 却下 / アクション / replyの検知、初回の許可ダイアログ
 
 自動テストで完了と判断してはいけない。GUI依存部分は手動検証チェックリストで確認する。
+
+テスト環境の既知の制約 (2026-07-28実測):
+
+- `NSHomeDirectory()` は子プロセスの `HOME` 環境変数を反映しない。実プロセスでのinstall成功系・衝突系は実環境を汚さずに再現できないため、fake注入のテンポラリ領域テストで担保する
+- xctestホストは `Bundle.main.bundleIdentifier` が非nil。「バンドル外」のシミュレートは判定の注入、または実バイナリのプロセス起動で行う
+
+_updated: 2026-07-28 (CLI内蔵インストーラ・listサブコマンド・symlink再exec正規化を反映)_
