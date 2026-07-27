@@ -26,7 +26,7 @@ enum YobirinMain {
             YobirinCommand.main()
         case .guideInstall:
             FileHandle.standardError.write(Data((installGuideMessage + "\n").utf8))
-            exit(1)
+            exit(ResultEmitter.environmentErrorExitCode)
         }
     }
 
@@ -79,6 +79,7 @@ enum LaunchGate {
 /// (Requirement 11.8)。
 struct YobirinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
+        version: YobirinVersion.current,
         subcommands: [NotifyCommand.self, InstallCommand.self],
         defaultSubcommand: NotifyCommand.self
     )

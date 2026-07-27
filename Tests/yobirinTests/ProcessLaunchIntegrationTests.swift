@@ -148,6 +148,19 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
+    func testOutsideBundleWithVersionPrintsVersionAndExitsZero() throws {
+        // 起動ゲートが `--version` をrunCLIへ通し、ArgumentParser側でも
+        // `CommandConfiguration.version` (YobirinVersion.current) が結線されていることを
+        // 実プロセスで確認する (どちらか片方だけだとusageエラーになる)。
+        let result = try runYobirin(arguments: ["--version"])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(
+            result.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+            YobirinVersion.current)
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
     // MARK: - A. symlink経由起動 (実体パスへの再exec。design.md CLIとアプリの二面性)
 
     func testSymlinkToPlainBinaryReExecsAndStillGuidesInstallWithoutRecursion() throws {
