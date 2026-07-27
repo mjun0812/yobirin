@@ -99,6 +99,12 @@ $ ./yobirin install
 
 `install` を実行すると、バイナリが自分自身を複製してad-hoc署名した `Yobirin.app` を組み立て、`~/Applications` へ配置し、コマンドを `~/.local/bin/yobirin` へsymlinkします。`~/.local/bin` をPATHに通しておいてください (配置先は `YOBIRIN_BIN_DIR` で変更できます)。ダウンロードしたファイルは、インストールが済めば削除して構いません。
 
+ブラウザでReleasesページからダウンロードした場合は、quarantine属性が付くため初回実行がGatekeeperにブロックされます。実行前に属性を外してください (curlでのダウンロードでは属性が付かないので不要です):
+
+```console
+$ xattr -d com.apple.quarantine ./yobirin
+```
+
 ### ソースから
 
 ```console

@@ -99,6 +99,12 @@ $ ./yobirin install
 
 Running `install` makes the binary copy itself into an ad-hoc signed `Yobirin.app`, place it into `~/Applications`, and symlink the command to `~/.local/bin/yobirin`. Make sure `~/.local/bin` is on your `PATH` (the directory can be changed with `YOBIRIN_BIN_DIR`). The downloaded file can be deleted once installation is done.
 
+If you downloaded the binary from the Releases page with a browser, macOS attaches a quarantine attribute and Gatekeeper blocks the first run. Remove the attribute before running (curl downloads don't get the attribute, so this is not needed for the steps above):
+
+```console
+$ xattr -d com.apple.quarantine ./yobirin
+```
+
 ### From source
 
 ```console
