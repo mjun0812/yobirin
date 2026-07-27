@@ -2,4 +2,5 @@
 prek = "0.4"
 shfmt = "3.13"
 shellcheck = "0.11"
-"aqua:oxc-project/oxc/oxfmt" = "1.75"
+node = "lts"
+"npm:oxfmt" = "0.60"
