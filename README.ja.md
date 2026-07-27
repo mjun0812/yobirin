@@ -15,23 +15,22 @@
 
 <p align="center"><a href="README.md">English README is here</a></p>
 
-yobirinは、macOSの通知を1件配信し、ユーザーの反応 (クリック、却下、アクションボタン、テキスト返信、タイムアウト) を待って、結果をJSONでstdoutへ出力するCLIです。シェルスクリプトやツールのhookから、通知への反応で処理を分岐できます。
+yobirinは、macOSの通知を配信し、ユーザーの反応 (クリック、却下、アクションボタン、テキスト返信、タイムアウト) を待って、結果をJSONで出力するCLIです。ShellScriptやツールのhookから、通知への反応で処理を分岐できます。
 
 ```console
 $ yobirin --title "Deploy" --message "リリースを承認しますか?" --action "承認" --action "却下" --timeout 60
 {"result":"action","action":"承認","actionIndex":0}
 ```
 
-## 特徴
+## Features
 
 - **応答の捕捉**：クリック、却下、アクション選択、テキスト返信、タイムアウトを区別してJSONで返します
-- **リークしない待機**：ポーリングを使わず、`UserNotifications` frameworkのdelegateコールバックだけで待ちます。通知を放置してもCPUもメモリも消費しません
+- **低リソース**：ポーリングを使わず、`UserNotifications` frameworkのdelegateコールバックだけで待ちます。通知を放置してもCPUもメモリも消費しません
 - **1コマンドの導入**：リリースのバイナリ1つで `yobirin install` するだけです。ビルドツールチェーンは要りません
-- **アイコンの使い分け**：プロファイル機構で、アイコンと名義だけが異なる通知を出し分けられます
-- **状態の可視化**：`yobirin list` がインストール状況を、`yobirin ps` が応答待ちのプロセスを一覧します
-- **なりすまさない**：通知は常にyobirin自身の名義で出します。システム設定から独立してオン/オフできます
+- **アイコンの使い分け**：Profileを切り替えることで、自由にアイコンを設定して通知を出し分けられます
+- **状態の可視化**：`yobirin list` がProfileを、`yobirin ps` が通知の応答待ちのプロセスを一覧表示します
 
-## ユースケース
+## Usecase
 
 ### 完了通知から次の動作へ
 
@@ -58,7 +57,7 @@ fi
 
 ### coding agentのhookから指示を受け取る
 
-Claude CodeやCodexの通知hookに組み込むと、タスク完了の通知に返信して、そのまま次の指示を送れます。プロファイルを使えば、通知はagentのアイコンと名義で表示されます:
+Claude CodeやCodexの通知hookに組み込むと、タスク完了の通知に返信して、そのまま次の指示を送れます。:
 
 ```bash
 reply=$(yobirin --profile claude --title "Claude Code" \
@@ -83,14 +82,14 @@ esac
 
 ## 動作要件
 
-- macOS (Apple Silicon / Intel のユニバーサルバイナリ)
+- macOS (Apple Silicon / Intel)
 - Xcode Command Line Tools (ソースからビルドする場合のみ)
 
 ## インストール
 
 ### リリースバイナリから (ツールチェーン不要)
 
-ビルド済みバイナリをダウンロードして、バイナリ自身にインストールさせます (privateリポジトリの間は [gh CLI](https://cli.github.com/) が必要です):
+ビルド済みバイナリをダウンロードして、バイナリ自身にインストールさせます:
 
 ```console
 $ gh release download --repo mjun0812/yobirin --pattern yobirin
@@ -209,6 +208,20 @@ claude     com.mjun0812.yobirin.claude  0.4.1    /Users/you/Applications/Yobirin
 $ rm -rf ~/Applications/Yobirin*.app
 $ rm -f ~/.local/bin/yobirin*
 ```
+
+## 仕組み
+
+yobirinの実体は、1つのCLIバイナリです。ただし、macOSの現行通知API (`UserNotifications` framework) には「通知を出せるのは `.app` バンドルとして登録されたアプリだけ」という制約があり、素のバイナリから呼ぶと動きません。旧APIの `NSUserNotification` にはこの制約がありませんが、非推奨であるうえ、却下の検知にポーリングが必要でメモリリークの温床になるため使っていません。
+
+そこで `yobirin install` は、実行中のバイナリが自分自身を複製して `Yobirin.app` を組み立て、ad-hoc署名して `~/Applications` へ配置し、PATH上の `yobirin` コマンドをその中の実行ファイルへのsymlinkとして張ります:
+
+```text
+~/.local/bin/yobirin  →  ~/Applications/Yobirin.app/Contents/MacOS/yobirin  (symlink)
+```
+
+つまり、CLIとして呼んでいるのはアプリの中のバイナリそのものです。通知を出すときだけアプリとして振る舞って応答を待ち (Dockには表示されません)、結果が確定したら終了します。常駐はしません。`install` や `list`、`ps` は通知APIに触れない、ただのCLIとして動きます。
+
+アイコンプロファイルは、この仕組みの応用です。同じバイナリを、アイコンとBundle IDだけ変えた別のアプリ (`Yobirin-Claude.app` など) として複製し、`--profile` 指定時はそのバンドル内のバイナリへ実行を引き継ぎます。macOSから見ればそれぞれ独立したアプリなので、通知の許可もアイコンも名義も別々に扱われます。
 
 ## 開発
 
