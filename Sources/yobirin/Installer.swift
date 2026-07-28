@@ -32,6 +32,8 @@ enum Installer {
         case existingLinkIsNotSymlink(path: String)
         /// 配置後の署名検証、または配置済みコマンドの実行確認が失敗した。
         case verificationFailed(String)
+        /// アンインストール対象のバンドルが存在しない (Requirement 19.4)。
+        case bundleNotInstalled(path: String)
 
         var errorDescription: String? {
             switch self {
@@ -47,12 +49,19 @@ enum Installer {
                 return "\(path) exists and is not a symlink; aborting without overwriting"
             case .verificationFailed(let reason):
                 return "Post-install verification failed: \(reason)"
+            case .bundleNotInstalled(let path):
+                return "Not installed: \(path)"
             }
         }
     }
 
     /// PATH上のsymlink先ディレクトリを指定する環境変数名 (旧 `scripts/install.sh` を踏襲)。
     static let binDirectoryEnvironmentKey = "YOBIRIN_BIN_DIR"
+
+    /// LaunchServicesの登録操作コマンド (Requirement 19.2)。
+    static let lsregisterPath =
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
+        + "/Support/lsregister"
 
     /// `install` の結果 (design.md「アイコン変化の検出 (Requirement 16)」)。
     /// 案内表示の要否はInstallCommandが判定するため、成否・終了コードには影響しない (16.5)。
@@ -199,6 +208,62 @@ enum Installer {
         }
 
         return InstallOutcome(replacedExistingBundle: bundleExisted, iconChanged: iconChanged)
+    }
+
+    /// `uninstall` の結果 (Requirement 19.7, 19.8)。
+    /// 案内表示の要否はUninstallCommandが判定するため、成否・終了コードには影響しない。
+    struct UninstallOutcome: Equatable {
+        /// 削除したバンドルのMach-Oを指したままPATH上に残ったsymlink (無ければnil)。
+        /// 削除はせず、案内のためだけに返す (19.3, 19.7)。
+        let danglingLinkPath: String?
+        /// LaunchServices登録の解除が失敗したときの終了コード (成功時はnil)。
+        let unregisterFailureExitCode: Int32?
+    }
+
+    /// バンドルの削除とLaunchServices登録の解除を行う (Requirement 19)。
+    ///
+    /// **PATH上のコマンドは削除しない** (19.3)。`install` が張るsymlinkは1本だが、PATH上には
+    /// mise / Homebrew が管理する同名の実バイナリが存在しうる (実測: mise導入時は
+    /// `command -v yobirin` がmise管理の実バイナリを指す)。これらを消すとパッケージマネージャの
+    /// 管理状態を壊すため、削除対象はバンドルとその登録に限り、削除したバンドルを指したまま残る
+    /// symlinkは案内のために返すだけにする (19.7)。
+    ///
+    /// 登録解除はバンドルが実在するうちに行い、失敗しても削除は続行する (19.8)。
+    static func uninstall(
+        profile: String? = nil,
+        homeDirectory: String = ProfileNaming.resolvedHomeDirectory(),
+        binDirectory: String? = nil,
+        fileManager: FileManager = .default,
+        runProcess: ProcessRunner = Self.defaultRunProcess
+    ) throws -> UninstallOutcome {
+        let naming = try ProfileNaming.resolve(profile: profile, homeDirectory: homeDirectory)
+        guard fileManager.fileExists(atPath: naming.bundlePath) else {
+            throw InstallError.bundleNotInstalled(path: naming.bundlePath)
+        }
+
+        let unregisterExitCode = runProcess(lsregisterPath, ["-u", naming.bundlePath])
+        try fileManager.removeItem(atPath: naming.bundlePath)
+
+        let resolvedBinDirectory =
+            binDirectory
+            ?? ProcessInfo.processInfo.environment[binDirectoryEnvironmentKey]
+            ?? "\(homeDirectory)/.local/bin"
+        let linkPath = "\(resolvedBinDirectory)/\(ProfileNaming.executableName)"
+        // `fileExists(atPath:)` はsymlinkを辿るため、削除直後の壊れたsymlinkを「存在しない」と
+        // 誤判定する。symlink自体の有無は `attributesOfItem` (lstat相当) で見る (installと同じ作法)。
+        var danglingLinkPath: String?
+        if let attributes = try? fileManager.attributesOfItem(atPath: linkPath),
+            (attributes[.type] as? FileAttributeType) == .typeSymbolicLink,
+            let destination = try? fileManager.destinationOfSymbolicLink(atPath: linkPath),
+            destination == naming.machOPath
+        {
+            danglingLinkPath = linkPath
+        }
+
+        return UninstallOutcome(
+            danglingLinkPath: danglingLinkPath,
+            unregisterFailureExitCode: unregisterExitCode == 0 ? nil : unregisterExitCode
+        )
     }
 
     /// 実行中の自分自身のバイナリパスを `_NSGetExecutablePath` で解決する

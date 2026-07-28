@@ -221,9 +221,18 @@ claude     com.mjun0812.yobirin.claude  1.0.1    /Users/you/Applications/Yobirin
 
 ## アンインストール
 
+バンドルの削除は `uninstall` で行います。macOSへのアプリ登録 (LaunchServices) もあわせて解除するため、手で `rm` するより確実です。
+
 ```console
-$ rm -rf ~/Applications/Yobirin*.app
-$ rm -f ~/.local/bin/yobirin*
+$ yobirin uninstall                     # デフォルトのバンドルを削除
+$ yobirin uninstall --profile claude    # プロファイルのバンドルを削除
+```
+
+`uninstall` はPATH上の `yobirin` コマンドを削除しません。miseやHomebrew経由で導入した場合、PATH上にあるのはそれらが管理する実バイナリであり、yobirinが消してしまうとパッケージマネージャ側の管理状態が壊れるためです。コマンドごと消すには、導入に使った方法で削除してください。
+
+```console
+$ mise uninstall github:mjun0812/yobirin   # miseで入れた場合
+$ rm -f ~/.local/bin/yobirin               # 手動インストールの場合
 ```
 
 ## 仕組み

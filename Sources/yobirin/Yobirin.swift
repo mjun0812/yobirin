@@ -80,14 +80,14 @@ enum LaunchGate {
     /// 通知機能に依存せず完了しなければならない)。
     ///
     /// `--help` / `-h` / `--version` は引数列のどこにあってもArgumentParserが解釈するため
-    /// 位置を問わず検出する。`install` / `list` は実行ファイル名を除く最初の非フラグ引数のみを見る
+    /// 位置を問わず検出する。インストール系サブコマンドは実行ファイル名を除く最初の非フラグ引数のみを見る
     /// (design.md フローチャートの `outCmd` 分岐)。
     private static func isRoutableOutsideBundle(_ arguments: [String]) -> Bool {
         let rest = arguments.dropFirst()
         if rest.contains("--help") || rest.contains("-h") || rest.contains("--version") {
             return true
         }
-        return ["install", "list", "ps"].contains(rest.first { !$0.hasPrefix("-") })
+        return ["install", "uninstall", "list", "ps"].contains(rest.first { !$0.hasPrefix("-") })
     }
 }
 
@@ -164,7 +164,10 @@ struct YobirinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "yobirin",
         version: YobirinVersion.current,
-        subcommands: [NotifyCommand.self, InstallCommand.self, ListCommand.self, PsCommand.self],
+        subcommands: [
+            NotifyCommand.self, InstallCommand.self, UninstallCommand.self, ListCommand.self,
+            PsCommand.self,
+        ],
         defaultSubcommand: NotifyCommand.self
     )
 }

@@ -93,6 +93,20 @@ final class LaunchGateTests: XCTestCase {
             LaunchGate.decide(arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true), .runCLI)
     }
 
+    func testOutsideBundleWithUninstallRunsCLI() {
+        XCTAssertEqual(
+            LaunchGate.decide(arguments: ["/path/to/yobirin", "uninstall"], isOutsideBundle: true),
+            .runCLI)
+    }
+
+    func testOutsideBundleWithUninstallProfileRunsCLI() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "uninstall", "--profile", "codex"],
+                isOutsideBundle: true),
+            .runCLI)
+    }
+
     func testOutsideBundleWithPsJSONRunsCLI() {
         XCTAssertEqual(
             LaunchGate.decide(arguments: ["/path/to/yobirin", "ps", "--json"], isOutsideBundle: true),
@@ -190,6 +204,16 @@ final class LaunchGateTests: XCTestCase {
         XCTAssertEqual(
             LaunchGate.decide(
                 arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
+            .runCLI)
+    }
+
+    /// アンインストールは引き継ぎ先バンドルを消す操作であり、インストール済みでも
+    /// 実行中のバイナリ自身で完結しなければならない (Requirements 17.6, 19.6)。
+    func testOutsideBundleWithUninstallRunsCLIRegardlessOfBundleInstalled() {
+        XCTAssertEqual(
+            LaunchGate.decide(
+                arguments: ["/path/to/yobirin", "uninstall"], isOutsideBundle: true,
                 isDefaultBundleInstalled: true),
             .runCLI)
     }

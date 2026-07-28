@@ -221,9 +221,18 @@ claude     com.mjun0812.yobirin.claude  1.0.1    /Users/you/Applications/Yobirin
 
 ## Uninstall
 
+Use `uninstall` to remove a bundle. It also unregisters the app from macOS (LaunchServices), which a plain `rm` leaves behind.
+
 ```console
-$ rm -rf ~/Applications/Yobirin*.app
-$ rm -f ~/.local/bin/yobirin*
+$ yobirin uninstall                     # remove the default bundle
+$ yobirin uninstall --profile claude    # remove a profile's bundle
+```
+
+`uninstall` does not remove the `yobirin` command on your PATH. When you installed via mise or Homebrew, that command is a real binary managed by the package manager, and deleting it would corrupt the package manager's state. To remove the command itself, use the method you installed it with.
+
+```console
+$ mise uninstall github:mjun0812/yobirin   # installed via mise
+$ rm -f ~/.local/bin/yobirin               # installed manually
 ```
 
 ## How it works

@@ -256,6 +256,17 @@
   - _Requirements: 18.1, 18.2_
   - _Boundary: ExitCoordinator_
 
+- [x] 15. uninstallサブコマンドを実装する
+  - `Installer` へアンインストールを追加する: 対象バンドルの解決 → LaunchServices登録の解除 (バンドルが実在するうちに実行) → バンドル削除、の順で行い、削除したバンドルのMach-Oを指したままPATH上に残るsymlinkを結果として返す (削除はしない)
+  - 対象バンドルが存在しない場合は専用のエラーで中断する (既存の `InstallError` に分岐を追加し、メッセージ体系を揃える)
+  - LaunchServices登録の解除に失敗しても削除は継続し、失敗を結果として返す (呼び出し元がstderrへ案内する)
+  - `uninstall` サブコマンドを `InstallCommand` と同じ注入可能な `perform` の形で実装し、ルートコマンドのサブコマンドと起動ゲートのバンドル外許可リストへ追加する (通知APIに触れないインストール系グループのまま)
+  - PATH上のコマンド (symlink・パッケージマネージャの実バイナリ) を削除しない
+  - テンポラリ領域のテストで、削除の成否・登録解除コマンドの引数と順序・未インストール時の非0終了・symlink非削除と案内の有無・解除失敗時の継続が確認でき、`swift test` が全green
+  - 実機で codex プロファイルを削除→再インストールし、`list` の増減とLaunchServices登録の消失が確認できる
+  - _Requirements: 19.1, 19.2, 19.3, 19.4, 19.5, 19.6, 19.7, 19.8_
+  - _Boundary: Installer, UninstallCommand, Yobirin (LaunchGate許可リスト・サブコマンド登録)_
+
 ## Implementation Notes
 
 - 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい

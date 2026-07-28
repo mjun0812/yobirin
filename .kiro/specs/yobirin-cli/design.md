@@ -307,6 +307,10 @@ yobirin install
         [--profile <name>]       # 指定時は派生バンドル (Yobirin-<Name>.app) を導入。省略時はデフォルト
         [--icon <path>]          # 焼き込むアイコンPNG。省略時は同梱の標準アイコン (鈴)
 
+# アンインストール (バンドル不要。素のバイナリから実行できる)
+yobirin uninstall
+        [--profile <name>]       # 指定時は派生バンドルを削除。省略時はデフォルト
+
 # 一覧 (バンドル不要。素のバイナリから実行できる)
 yobirin list
         [--json]                 # 機械可読なJSON (一覧JSON契約) をstdoutへ出力
@@ -319,6 +323,7 @@ yobirin ps
 - Preconditions: `--title` と `--message` は必須。バンドル内での引数なし起動は通知を出さず即exit (孤児掃除)、バンドル外ではインストール案内 (起動ゲート)
 - プロファイル名は `^[a-z0-9]+$` に制限 (パス注入防止。既存規約の踏襲)
 - 通知の実行時アイコン指定 (`--icon` を通知送信に付ける形) は提供しない (実現手段が存在しない)。`install --icon` は焼き込み時の指定であり別物
+- `uninstall` は `install` の対称操作だが、**PATH上のコマンドは削除しない** (Requirement 19.3)。`install` が張るsymlinkは1本 (`YOBIRIN_BIN_DIR` または `~/.local/bin` の `yobirin`) だが、PATH上には mise / Homebrew が管理する実バイナリが同名で存在しうる (実測: mise導入時は `command -v yobirin` がmise管理の実バイナリを指し、symlinkは日陰にいる)。これらを消すとパッケージマネージャの管理状態を壊すため、削除対象はバンドルとそのLaunchServices登録に限る。削除したバンドルを指したまま残るsymlinkは、削除せず案内する (19.7)。バンドルだけが消えた状態は「バイナリはあるがバンドル未インストール」であり、Requirement 12.2 / 17.3 が既に定義済みの状態へ戻るだけである
 
 ### App
 

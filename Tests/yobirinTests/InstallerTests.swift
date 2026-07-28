@@ -566,4 +566,202 @@ final class InstallerTests: XCTestCase {
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: "\(binDirectory)/yobirin"))
     }
+
+    // MARK: - Uninstall (Requirement 19)
+
+    /// テスト用に、インストール済み相当のバンドルと (任意で) PATH上のsymlinkを作る。
+    @discardableResult
+    private func makeInstalledBundle(profile: String? = nil, withSymlink: Bool = false) throws
+        -> ProfileNaming
+    {
+        let naming = try ProfileNaming.resolve(profile: profile, homeDirectory: homeDirectory)
+        try FileManager.default.createDirectory(
+            atPath: "\(naming.bundlePath)/Contents/MacOS", withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: naming.machOPath, contents: Data("dummy".utf8))
+        if withSymlink {
+            try FileManager.default.createDirectory(
+                atPath: binDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(
+                atPath: "\(binDirectory)/yobirin", withDestinationPath: naming.machOPath)
+        }
+        return naming
+    }
+
+    func testUninstallRemovesTheBundle() throws {
+        let naming = try makeInstalledBundle()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        _ = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: naming.bundlePath))
+    }
+
+    /// 登録解除はバンドルが実在するうちに行う (19.2)。lsregisterへ渡す引数と、
+    /// 呼び出し時点でバンドルがまだ存在することの両方を確認する。
+    func testUninstallUnregistersFromLaunchServicesBeforeDeletingTheBundle() throws {
+        let naming = try makeInstalledBundle()
+        var calls: [(String, [String])] = []
+        var bundleExistedAtUnregister: Bool?
+        let runProcess: Installer.ProcessRunner = { path, arguments in
+            calls.append((path, arguments))
+            bundleExistedAtUnregister = FileManager.default.fileExists(atPath: naming.bundlePath)
+            return 0
+        }
+
+        _ = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?.0, Installer.lsregisterPath)
+        XCTAssertEqual(calls.first?.1, ["-u", naming.bundlePath])
+        XCTAssertEqual(bundleExistedAtUnregister, true)
+    }
+
+    func testUninstallWithMissingBundleThrowsBundleNotInstalled() throws {
+        let naming = try ProfileNaming.resolve(profile: nil, homeDirectory: homeDirectory)
+        let (runProcess, calls) = makeAlwaysSucceedingRunProcess()
+
+        XCTAssertThrowsError(
+            try Installer.uninstall(
+                profile: nil,
+                homeDirectory: homeDirectory,
+                binDirectory: binDirectory,
+                runProcess: runProcess
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? Installer.InstallError,
+                .bundleNotInstalled(path: naming.bundlePath))
+        }
+        XCTAssertTrue(calls().isEmpty, "存在しないバンドルの登録解除を試みてはならない")
+    }
+
+    /// PATH上のコマンドは削除しない (19.3)。削除したバンドルを指したまま残るsymlinkは
+    /// 案内のためにパスとして返すだけで、実体は残る (19.7)。
+    func testUninstallKeepsTheSymlinkOnPathAndReportsItAsDangling() throws {
+        let naming = try makeInstalledBundle(withSymlink: true)
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertEqual(outcome.danglingLinkPath, "\(binDirectory)/yobirin")
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: "\(binDirectory)/yobirin")
+        XCTAssertEqual(
+            attributes[.type] as? FileAttributeType, .typeSymbolicLink,
+            "PATH上のsymlinkは削除してはならない")
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: "\(binDirectory)/yobirin"),
+            naming.machOPath)
+    }
+
+    /// 他所 (パッケージマネージャ等) を指すリンクは、削除もせず案内対象にもしない (19.3)。
+    func testUninstallDoesNotReportALinkPointingElsewhere() throws {
+        try makeInstalledBundle()
+        try FileManager.default.createDirectory(
+            atPath: binDirectory, withIntermediateDirectories: true)
+        let otherTarget = tempRoot.appendingPathComponent("mise-managed-yobirin").path
+        FileManager.default.createFile(atPath: otherTarget, contents: Data("other".utf8))
+        try FileManager.default.createSymbolicLink(
+            atPath: "\(binDirectory)/yobirin", withDestinationPath: otherTarget)
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertNil(outcome.danglingLinkPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherTarget))
+    }
+
+    /// PATH上に実ファイル (symlinkでない) がある場合も触らず、案内対象にしない (19.3)。
+    func testUninstallDoesNotReportARealFileOnPath() throws {
+        try makeInstalledBundle()
+        try FileManager.default.createDirectory(
+            atPath: binDirectory, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: "\(binDirectory)/yobirin", contents: Data("real binary".utf8))
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertNil(outcome.danglingLinkPath)
+        XCTAssertEqual(
+            FileManager.default.contents(atPath: "\(binDirectory)/yobirin"),
+            Data("real binary".utf8))
+    }
+
+    /// プロファイル削除ではsymlinkに触れない (installがプロファイル時に張らないことと対称)。
+    func testUninstallProfileRemovesOnlyThatBundleAndLeavesDefaultLinkAlone() throws {
+        let defaultNaming = try makeInstalledBundle(withSymlink: true)
+        let profileNaming = try makeInstalledBundle(profile: "codex")
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.uninstall(
+            profile: "codex",
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profileNaming.bundlePath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: defaultNaming.bundlePath))
+        XCTAssertNil(outcome.danglingLinkPath)
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: "\(binDirectory)/yobirin"),
+            defaultNaming.machOPath)
+    }
+
+    /// 登録解除に失敗しても削除は続行し、失敗を結果として返す (19.8)。
+    func testUninstallContinuesDeletionWhenUnregisterFails() throws {
+        let naming = try makeInstalledBundle()
+        let runProcess: Installer.ProcessRunner = { _, _ in 7 }
+
+        let outcome = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: naming.bundlePath))
+        XCTAssertEqual(outcome.unregisterFailureExitCode, 7)
+    }
+
+    func testUninstallReportsNoUnregisterFailureOnSuccess() throws {
+        try makeInstalledBundle()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+
+        let outcome = try Installer.uninstall(
+            profile: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            runProcess: runProcess
+        )
+
+        XCTAssertNil(outcome.unregisterFailureExitCode)
+    }
 }
