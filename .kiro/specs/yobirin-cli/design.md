@@ -35,6 +35,8 @@
 - インストール構成: `~/Applications` への配置、PATH上のsymlink (1本)、アイコンプロファイル (派生バンドル) と `--profile` ディスパッチ
 - インストール済みバンドルの一覧表示 (`list` サブコマンド。テキスト / `--json`)
 - 待機中プロセスの一覧表示 (`ps` サブコマンド。テキスト / `--json`)
+- インストール済みバンドルの削除とLaunchServices登録の解除 (`uninstall` サブコマンド)
+- 新規インストール直後の確認用通知の発行 (通知許可の取得タイミングを、実際に通知が必要になる場面より前へ倒す)
 - 実行ファイルのビルドパイプライン (CI) とリリース配布 (ユニバーサルバイナリの添付)
 
 ### Out of Boundary
@@ -43,12 +45,15 @@
 - alerter互換レイヤ
 - Linux / Windows対応、デーモン化
 - Homebrew formula・notarization (M4 OSS化フェーズ)
+- PATH上のコマンド (symlink・パッケージマネージャが配置した実バイナリ) の削除。`uninstall` はバンドルと登録のみを対象とし、コマンドの導入元はそれぞれのパッケージマネージャが管理する
+- 通知許可の付与そのもの。確認用通知は許可ダイアログを出す契機を作るだけで、許可状態の変更・監視は行わない
 
 ### Allowed Dependencies
 
 - システムフレームワーク: UserNotifications、AppKit、ImageIO / UniformTypeIdentifiers (icns生成)
 - swift-argument-parser (引数パース)
-- 実行時の外部コマンド: `codesign` (インストール時のad-hoc署名。Xcode CLT前提)
+- 実行時の外部コマンド: `codesign` (インストール時のad-hoc署名。Xcode CLT前提)、`lsregister` (アンインストール時のLaunchServices登録解除)
+- 実行時の自己起動: インストール済みバンドルのMach-O (起動検証の `--help` 実行と、確認用通知の発行)
 - ビルド時 (CI): Xcode Command Line Tools (`swiftc`, `lipo`)
 - 制限付きentitlementを要求する機能は使用禁止 (ad-hoc署名では起動不能になる)
 
@@ -58,6 +63,7 @@
 - CLIオプション・サブコマンド体系の互換性を壊す変更 (`yobirin --title ...` の直接呼び出しと `--profile` の意味)
 - Bundle ID・インストール配置 (バンドルの場所、symlinkの向き先) の変更
 - インストール手段の変更 (シェルスクリプト廃止→CLI一元化により、dotfilesのインストール手順は追従書き換えが必要)
+- インストール時に副作用 (確認用通知) を持つようになったこと。無人環境で `install` を回す運用 (CI・パッケージマネージャのpostinstall) は、通知が出せなくても失敗しない前提に依存する
 
 ## Architecture
 
@@ -127,11 +133,12 @@ Sources/yobirin/
 ├── Yobirin.swift                # ルートコマンド (subcommands + defaultSubcommand)、起動ゲート (バンドル外検知→引数なしガード→ルーティング)
 ├── NotifyCommand.swift          # 通知送信サブコマンド (既定)。既存オプション群 + --profile
 ├── ProfileDispatch.swift        # --profile指定時に対象バンドルのMach-Oへexecする薄いディスパッチ
-├── InstallCommand.swift         # installサブコマンドの引数定義 (--profile / --icon)
+├── InstallCommand.swift         # installサブコマンドの引数定義 (--profile / --icon)、アイコン変更・通知確認の案内出力
+├── UninstallCommand.swift       # uninstallサブコマンドの引数定義 (--profile)、削除結果の案内出力
 ├── ListCommand.swift            # listサブコマンド (バンドル走査・一覧出力・--json)
 ├── PsCommand.swift              # psサブコマンド (通知待機プロセスの走査・一覧出力・--json)
 ├── BundleEnvironment.swift      # バンドル内外判定 + symlink起動の実体パス再exec正規化
-├── Installer.swift              # バンドル組み立て・配置・symlink・署名・起動検証のオーケストレーション
+├── Installer.swift              # バンドル組み立て・配置・symlink・署名・起動検証・確認用通知の発行・アンインストールのオーケストレーション
 ├── IcnsWriter.swift             # ImageIOによるicns生成 (10スロット、DPIメタデータ付与)
 ├── DefaultIcon.swift            # 同梱標準アイコンのバイト列 (生成済みソース。再生成手順をコメントで保持)
 ├── AppDelegate.swift            # NSApplicationライフサイクル、認可フロー、遅延exit
@@ -150,7 +157,7 @@ assets/
 - `scripts/build-app.sh` — バンドル組み立てはInstallerへ一元化 (Requirement 9.3)
 - `scripts/install.sh` — `yobirin install` へ置換
 
-> ファイル分割は責務の単位を示す。実装時に統合・分割してよいが、責務の境界 (CLI / ディスパッチ / インストール / ライフサイクル / 通知セッション / 出力) は保つこと。既存の AppFlow.swift / Scheduler.swift / LaunchGuard.swift / ExitCoordinator.swift / NotificationRequest.swift は変更対象外 (Yobirin.swiftの起動ゲート再構成で呼び出し位置のみ変わる)。
+> ファイル分割は責務の単位を示す。実装時に統合・分割してよいが、責務の境界 (CLI / ディスパッチ / インストール / ライフサイクル / 通知セッション / 出力) は保つこと。既存の AppFlow.swift / Scheduler.swift / LaunchGuard.swift / NotificationRequest.swift は変更対象外 (Yobirin.swiftの起動ゲート再構成で呼び出し位置のみ変わる)。ExitCoordinator.swift は結果出力の即時flush (Requirement 18) で書き込み実装のみ変更する。
 
 ## System Flows
 
@@ -247,25 +254,29 @@ flowchart TD
 | 15          | 待機中プロセスの一覧           | PsCommand, ProfileDispatch (ProfileNaming逆引き)      | CLI契約 (ps) / psJSON契約     | 起動ゲートフロー          |
 | 16          | アイコン変更時の反映遅延の案内 | Installer, InstallCommand                             | -                             | インストールフロー        |
 | 17          | 透過ディスパッチ               | Yobirin (起動ゲート), ProfileDispatch (ProfileNaming) | -                             | 起動ゲートフロー          |
+| 18          | 結果出力の即時到達             | ExitCoordinator                                       | 出力JSON契約                  | メインフロー              |
+| 19          | バンドルのアンインストール     | Installer, UninstallCommand, Yobirin (起動ゲート)     | CLI契約 (uninstall)           | インストールフロー        |
+| 20          | インストール直後の通知確認     | Installer, InstallCommand                             | CLI契約 (install)             | インストールフロー        |
 
 ## Components and Interfaces
 
-| Component           | Domain/Layer | Intent                                                       | Req Coverage | Key Dependencies             | Contracts       |
-| ------------------- | ------------ | ------------------------------------------------------------ | ------------ | ---------------------------- | --------------- |
-| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                | 11, 12, 17   | swift-argument-parser (P0)   | CLI             |
-| NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証         | 1, 2, 4, 5   | swift-argument-parser (P0)   | CLI             |
-| ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec               | 10           | Darwin execv (P0)            | CLI             |
-| InstallCommand      | Install      | installサブコマンドの引数定義                                | 11, 16       | swift-argument-parser (P0)   | CLI             |
-| ListCommand         | Install      | インストール済みバンドルの走査と一覧出力 (テキスト / JSON)   | 14           | swift-argument-parser (P0)   | CLI, API (JSON) |
-| PsCommand           | Install      | 通知待機プロセスの走査と一覧出力 (テキスト / JSON)           | 15           | Darwin sysctl / libproc (P0) | CLI, API (JSON) |
-| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証          | 8, 9, 11, 16 | 外部codesign (P0)            | Batch           |
-| IcnsWriter          | Install      | ImageIOによるicns生成 (10スロット)                           | 11           | ImageIO (P0)                 | -               |
-| DefaultIcon         | Install      | 同梱標準アイコンのバイト列 (生成済みソース)                  | 11           | -                            | -               |
-| AppLifecycle        | App          | NSApplication起動、認可フロー、引数なしガード、遅延exit      | 5, 6, 7      | AppKit (P0)                  | -               |
-| NotificationSession | Notification | category登録・group置換・通知add・応答処理・結果の排他確定   | 2, 3, 4, 5   | UserNotifications (P0)       | State           |
-| ResultEmitter       | Output       | 結果JSON生成・stdout出力・終了コード                         | 3, 7         | Foundation (P0)              | API (JSON)      |
-| Release CI          | Build        | v*タグ→テスト→ユニバーサル実行ファイル→Release作成           | 9, 13        | GitHub Actions (P0)          | Batch           |
-| Install layout      | Distribution | `~/Applications` 配置・symlink 1本・プロファイル派生バンドル | 8, 10        | -                            | -               |
+| Component           | Domain/Layer | Intent                                                                        | Req Coverage         | Key Dependencies               | Contracts       |
+| ------------------- | ------------ | ----------------------------------------------------------------------------- | -------------------- | ------------------------------ | --------------- |
+| YobirinCommand      | CLI          | ルートコマンド (サブコマンド構造)、起動ゲート                                 | 11, 12, 17           | swift-argument-parser (P0)     | CLI             |
+| NotifyCommand       | CLI          | 通知送信の既定サブコマンド。オプション定義・入力検証                          | 1, 2, 4, 5           | swift-argument-parser (P0)     | CLI             |
+| ProfileDispatch     | CLI          | `--profile` 指定時に対象バンドルのMach-Oへexec                                | 10                   | Darwin execv (P0)              | CLI             |
+| InstallCommand      | Install      | installサブコマンドの引数定義と案内出力                                       | 11, 16, 20           | swift-argument-parser (P0)     | CLI             |
+| UninstallCommand    | Install      | uninstallサブコマンドの引数定義と案内出力                                     | 19                   | swift-argument-parser (P0)     | CLI             |
+| ListCommand         | Install      | インストール済みバンドルの走査と一覧出力 (テキスト / JSON)                    | 14                   | swift-argument-parser (P0)     | CLI, API (JSON) |
+| PsCommand           | Install      | 通知待機プロセスの走査と一覧出力 (テキスト / JSON)                            | 15                   | Darwin sysctl / libproc (P0)   | CLI, API (JSON) |
+| Installer           | Install      | 自己複製→Info.plist→icns→署名→配置→symlink→起動検証→確認通知 / 削除と登録解除 | 8, 9, 11, 16, 19, 20 | 外部codesign / lsregister (P0) | Batch           |
+| IcnsWriter          | Install      | ImageIOによるicns生成 (10スロット)                                            | 11                   | ImageIO (P0)                   | -               |
+| DefaultIcon         | Install      | 同梱標準アイコンのバイト列 (生成済みソース)                                   | 11                   | -                              | -               |
+| AppLifecycle        | App          | NSApplication起動、認可フロー、引数なしガード、遅延exit                       | 5, 6, 7              | AppKit (P0)                    | -               |
+| NotificationSession | Notification | category登録・group置換・通知add・応答処理・結果の排他確定                    | 2, 3, 4, 5           | UserNotifications (P0)         | State           |
+| ResultEmitter       | Output       | 結果JSON生成・stdout出力・終了コード                                          | 3, 7                 | Foundation (P0)                | API (JSON)      |
+| Release CI          | Build        | v*タグ→テスト→ユニバーサル実行ファイル→Release作成                            | 9, 13                | GitHub Actions (P0)            | Batch           |
+| Install layout      | Distribution | `~/Applications` 配置・symlink 1本・プロファイル派生バンドル                  | 8, 10                | -                              | -               |
 
 ### CLI
 
@@ -401,7 +412,7 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 | Field        | Detail                                                          |
 | ------------ | --------------------------------------------------------------- |
 | Intent       | CLI自身によるバンドル組み立て・配置・検証 (実装はこの1箇所のみ) |
-| Requirements | 8, 9, 11, 16                                                    |
+| Requirements | 8, 9, 11, 16, 19, 20                                            |
 
 **Responsibilities & Constraints**
 
@@ -415,10 +426,19 @@ func userNotificationCenter(_ center: UNUserNotificationCenter,
 - **アイコン変化の検出 (Requirement 16)**: 旧バンドル削除の前に既存の `Contents/Resources/AppIcon.icns` を読み取り、新icnsとバイト比較する。installは「既存バンドルを置き換えたか」「アイコンが変化したか」を結果として呼び出し元へ返す (旧icnsが読み取れない場合は変化扱い — 16.4の安全側)。この検出はインストールの成否・終了コードに影響しない (16.5)
 - InstallCommandは「置き換え かつ アイコン変化」のときだけ、完了メッセージに続けて反映遅延の案内 (ログアウト→ログインが必要 / 新プロファイル名なら即時反映) をstdoutへ1行出す (16.1〜16.3)。それ以外は何も出さない
 
+- **インストール直後の通知確認 (Requirement 20)**: 新規インストール時に限り、配置したバンドルのMach-Oを通知引数付きで起動して確認用の通知を1件出す。通知APIをインストーラへ持ち込まないための手段でもある (子プロセスはバンドル内実行になるため、通知系の責務はそちら側に留まる)
+  - **応答を待たない**: 起動検証の `--help` 実行は終了コードを見るため待つが、確認用の通知は待たずに投げる (`ProcessRunner` とは別の「起動するだけ」の注入点を設ける)。初回インストールでは通知許可ダイアログが出るまでタイムアウトが進まず、待つとインストールが返らなくなるため (`--timeout 5` の通知が48秒待った実測に基づく制約と同根。20.2)
+  - **新規のみ**: 既存バンドルの置き換えでは出さない。Requirement 16のアイコン比較で既に持っている「既存バンドルを置き換えたか」をそのまま条件に使い、判定材料を増やさない (20.4)
+  - **成否に影響しない**: 起動できなくても無視し、インストールの終了コードを変えない (20.3)。CIやパッケージマネージャのpostinstallなど、通知を受け取れない環境で回っても壊れない
+  - **呼び出し元の出力を汚さない**: 待たない以上、子プロセスは親の終了後も生き続ける (実測: `Process` を `run()` して待たずに親がexitしても子は生存)。標準入出力を継承したままだと、タイムアウト時の結果JSONが数十秒後に呼び出し元のstdoutへ紛れ込むため、確認用の起動では標準入出力を `/dev/null` へ向ける
+  - **残らない**: 確認用の通知には正のタイムアウトを付ける。応答がなければ既存のタイムアウト処理 (Requirement 5.2) が配信済み通知を削除するため、通知センターに残らない (20.6)
+  - InstallCommandは確認用の通知を出したときだけ、完了メッセージに続けて「表示されない場合の確認先」を案内する (20.5)
+  - 既知のエッジ: 初回の許可ダイアログが未応答のまま放置されると、確認用の子プロセスは許可が確定するまで待ち続ける (タイムアウトが進まないため)。これは初回通知に共通する既存の性質であり、`yobirin ps` で可視化できる
+
 ##### Batch / Job Contract
 
 - Trigger: `yobirin install [--profile <name>] [--icon <path>]`
-- Idempotency: 再実行はアップグレードとして動作 (旧バンドル削除→再配置)。同一Bundle IDの複数登録を作らない
+- Idempotency: 再実行はアップグレードとして動作 (旧バンドル削除→再配置)。同一Bundle IDの複数登録を作らない。確認用の通知は新規インストール時のみのため、再実行で通知が増えない (20.4)
 
 #### ListCommand
 
@@ -635,6 +655,9 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - PsCommand: 対象判定 (バンドル内パス × `--title` 有無のAND。install/list/ps/掃除/自PIDの除外)、argvからのタイトル・タイムアウト抽出 (`--title x` / `--title=x` 両形式)、順序 (起動時刻昇順 + PIDタイブレーク)、argv欠損の `-` / `null` 継続、0件のexit 0、走査失敗の非0、経過時間の整形、`--json` のスキーマ (fakeレコード注入で検証 — 15.2〜15.8)
 - 透過ディスパッチ: `LaunchGate.decide` の新マトリクス (バンドル外×通知系/引数なし×バンドル有無)、バージョン比較の分岐 (一致で無言・不一致でstderr案内)、install/list/ps/--helpが引き継がれないこと (17.1〜17.7の判定部)
 - アイコン変更案内: 新規 / 不変上書き / 変化上書き / 旧icns読み取り不能の4分岐で案内の有無が正しいこと、案内の有無で終了コードが変わらないこと (テンポラリ領域のInstallerテスト + fake注入のInstallCommandテスト — 16.1〜16.5)
+- 結果出力の即時flush: fd 1をパイプへ差し替え、書き込み直後・プロセス終了前にパイプから結果が読めること (18.1)
+- アンインストール: 削除の成否、登録解除コマンドの引数と「バンドルが実在するうちに呼ばれる」順序、未インストール時のエラー分岐、PATH上のsymlink/実ファイルを削除しないこと、削除したバンドルを指すリンクだけを案内対象にすること、登録解除失敗でも削除を継続すること (テンポラリ領域のInstallerテスト + fake注入のUninstallCommandテスト — 19.1〜19.8)
+- 確認用通知: 新規インストールでのみ発行されること、待たない注入点 (起動するだけ) 経由で呼ばれること、渡す引数がバンドルのMach-O + タイトル/本文/正のタイムアウトであること、発行の成否が終了コードを変えないこと、発行時のみ案内が出ること (テンポラリ領域のInstallerテスト + fake注入のInstallCommandテスト — 20.1〜20.6)
 
 ### Integration Tests (半自動)
 
@@ -656,6 +679,7 @@ alerter互換の制約はなく、結果種別と付随データを分離した�
 - リリースバイナリからのフルブートストラップ: 素のリリースバイナリで `install` → symlink経由で通知が出る → `install --profile <name> --icon <path>` → `--profile <name>` で当該アイコン・名義の通知が出る
 - バンドル外の素のバイナリで: デフォルトバンドル未インストール時に、引数なし起動と通知送信がクラッシュせず案内 + 非0で終了すること (クラッシュレポートが生成されないこと)
 - 透過ディスパッチ: PATH上の素のバイナリからの通知要求・引数なし起動が、導入済みデフォルトバンドルへ引き継がれて実際に通知配信・孤児掃除が行われること。バージョン不一致時のstderr案内が実際に表示されること
+- 確認用通知: 未導入のプロファイルを `install --profile <name>` で新規作成したとき、当該バンドルの名義・アイコンで確認用通知が実際に表示され、`install` が応答を待たずに完了すること。同じプロファイルへ再インストールしたときは通知が出ないこと。応答しなければ通知センターに残らないこと
 
 ## Supporting References
 

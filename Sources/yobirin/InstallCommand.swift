@@ -84,6 +84,14 @@ struct InstallCommand: ParsableCommand {
                 "Icon changes appear in notification banners only after you log out and back in (installing under a new profile name shows the new icon immediately)"
             )
         }
+
+        // 確認用通知の案内 (Requirement 20.5): 新規インストールで発行したときだけ出す。
+        // 案内の有無は成否・終了コードに影響しない (20.3)。
+        if outcome.sentConfirmationNotification {
+            stdoutWriter(
+                "Sent a confirmation notification. If it does not appear, check System Settings > Notifications."
+            )
+        }
     }
 
     private static func defaultInstall(profile: String?, iconPath: String?) throws

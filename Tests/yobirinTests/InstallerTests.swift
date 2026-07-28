@@ -567,6 +567,169 @@ final class InstallerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: "\(binDirectory)/yobirin"))
     }
 
+    // MARK: - Confirmation notification on a fresh install (Requirement 20)
+
+    /// 「起動するだけで待たない」注入点のスタブ。呼び出しを記録し、起動可否を切り替えられる。
+    private func makeLauncher(succeeds: Bool = true) -> (
+        launch: Installer.DetachedProcessLauncher, calls: () -> [(String, [String])]
+    ) {
+        var calls: [(String, [String])] = []
+        let launch: Installer.DetachedProcessLauncher = { path, arguments in
+            calls.append((path, arguments))
+            return succeeds
+        }
+        return (launch, { calls })
+    }
+
+    /// 既にインストール済みの状態を作ってから上書きインストールするためのヘルパー。
+    private func installOnce(runProcess: @escaping Installer.ProcessRunner, selfPath: String) throws {
+        _ = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: { _, _ in true }
+        )
+    }
+
+    func testFreshInstallLaunchesConfirmationNotificationFromTheInstalledBundle() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        let (launch, launchCalls) = makeLauncher()
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        let naming = try ProfileNaming.resolve(profile: nil, homeDirectory: homeDirectory)
+        XCTAssertEqual(launchCalls().count, 1)
+        XCTAssertEqual(launchCalls().first?.0, naming.machOPath)
+        XCTAssertTrue(outcome.sentConfirmationNotification)
+    }
+
+    /// 通知には正のタイムアウトが必須 (20.6: 応答がなくても通知センターに残らない)。
+    func testConfirmationNotificationCarriesTitleMessageAndPositiveTimeout() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        let (launch, launchCalls) = makeLauncher()
+
+        _ = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        let arguments = try XCTUnwrap(launchCalls().first?.1)
+        let titleIndex = try XCTUnwrap(arguments.firstIndex(of: "--title"))
+        XCTAssertFalse(arguments[titleIndex + 1].isEmpty)
+        let messageIndex = try XCTUnwrap(arguments.firstIndex(of: "--message"))
+        XCTAssertFalse(arguments[messageIndex + 1].isEmpty)
+        let timeoutIndex = try XCTUnwrap(arguments.firstIndex(of: "--timeout"))
+        let timeout = try XCTUnwrap(Double(arguments[timeoutIndex + 1]))
+        XCTAssertGreaterThan(timeout, 0)
+    }
+
+    /// 待つ経路 (`ProcessRunner`) で通知を送ってはならない (20.2)。
+    /// 待つとダイアログ応答までインストールが返らなくなる。
+    func testConfirmationNotificationIsNotSentThroughTheWaitingProcessRunner() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, runCalls) = makeAlwaysSucceedingRunProcess()
+        let (launch, _) = makeLauncher()
+
+        _ = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        XCTAssertFalse(
+            runCalls().contains { $0.1.contains("--title") },
+            "確認用の通知は完了を待つ実行経路で送ってはならない")
+    }
+
+    func testReplacingInstallDoesNotLaunchConfirmationNotification() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        try installOnce(runProcess: runProcess, selfPath: selfPath)
+        let (launch, launchCalls) = makeLauncher()
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        XCTAssertTrue(outcome.replacedExistingBundle)
+        XCTAssertTrue(launchCalls().isEmpty, "上書きインストールでは確認用の通知を出さない")
+        XCTAssertFalse(outcome.sentConfirmationNotification)
+    }
+
+    /// 起動に失敗してもインストールは成功する (20.3)。
+    func testInstallSucceedsWhenTheConfirmationNotificationCannotBeLaunched() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        let (launch, launchCalls) = makeLauncher(succeeds: false)
+
+        let outcome = try Installer.install(
+            profile: nil,
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        let naming = try ProfileNaming.resolve(profile: nil, homeDirectory: homeDirectory)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: naming.bundlePath),
+            "通知を出せなくてもバンドルは配置される")
+        XCTAssertEqual(launchCalls().count, 1)
+        XCTAssertFalse(outcome.sentConfirmationNotification)
+    }
+
+    /// プロファイルの新規作成でも、そのバンドルの名義で確認用の通知を出す (20.1)。
+    func testFreshProfileInstallLaunchesConfirmationNotificationFromTheProfileBundle() throws {
+        let selfPath = makeDummySelfExecutable()
+        let (runProcess, _) = makeAlwaysSucceedingRunProcess()
+        let (launch, launchCalls) = makeLauncher()
+
+        let outcome = try Installer.install(
+            profile: "codex",
+            iconPath: nil,
+            homeDirectory: homeDirectory,
+            binDirectory: binDirectory,
+            resolveSelfExecutablePath: { selfPath },
+            runProcess: runProcess,
+            launchDetached: launch
+        )
+
+        let naming = try ProfileNaming.resolve(profile: "codex", homeDirectory: homeDirectory)
+        XCTAssertEqual(launchCalls().count, 1)
+        XCTAssertEqual(launchCalls().first?.0, naming.machOPath)
+        XCTAssertTrue(outcome.sentConfirmationNotification)
+    }
+
     // MARK: - Uninstall (Requirement 19)
 
     /// テスト用に、インストール済み相当のバンドルと (任意で) PATH上のsymlinkを作る。

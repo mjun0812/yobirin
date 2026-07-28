@@ -18,6 +18,13 @@ enum Installer {
     /// (design.md「署名は外部codesignをProcessで起動」)。
     typealias ProcessRunner = (_ executablePath: String, _ arguments: [String]) -> Int32
 
+    /// 外部プロセスを起動するだけで完了を待たない実行 (Requirement 20.2)。戻り値は起動できたか。
+    ///
+    /// 終了コードを見る `ProcessRunner` とは別経路にする。確認用の通知は初回インストールで
+    /// 通知許可ダイアログを開くが、ダイアログ表示中はタイムアウトが進まないため、待つと
+    /// インストールが返らなくなる。
+    typealias DetachedProcessLauncher = (_ executablePath: String, _ arguments: [String]) -> Bool
+
     /// インストール失敗の分岐を判別できるエラー (design.md フローに関する決定)。
     enum InstallError: Error, Equatable, LocalizedError {
         /// `--icon` に指定したパスが存在しない、または読み込めない。
@@ -58,6 +65,20 @@ enum Installer {
     /// PATH上のsymlink先ディレクトリを指定する環境変数名 (旧 `scripts/install.sh` を踏襲)。
     static let binDirectoryEnvironmentKey = "YOBIRIN_BIN_DIR"
 
+    /// 新規インストール直後に出す確認用通知の内容 (Requirement 20.1)。
+    ///
+    /// 正のタイムアウトを必ず付ける。応答がなければ既存のタイムアウト処理 (Requirement 5.2) が
+    /// 配信済み通知を削除するため、通知センターに残らない (20.6)。
+    enum ConfirmationNotification {
+        static let title = "Installation complete"
+        static let message = "yobirin can now deliver notifications."
+        static let timeoutSeconds = 30
+
+        static var arguments: [String] {
+            ["--title", title, "--message", message, "--timeout", String(timeoutSeconds)]
+        }
+    }
+
     /// LaunchServicesの登録操作コマンド (Requirement 19.2)。
     static let lsregisterPath =
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
@@ -70,6 +91,9 @@ enum Installer {
         let replacedExistingBundle: Bool
         /// 新旧icnsのバイト内容が異なるか (旧icnsが読み取れない場合はtrue — 16.4の安全側)。
         let iconChanged: Bool
+        /// 確認用の通知を発行したか (Requirement 20.5の案内要否)。発行の成否は
+        /// インストールの成否・終了コードに影響しない (20.3)。
+        let sentConfirmationNotification: Bool
     }
 
     /// バンドルの組み立て・署名・配置・起動検証を行う (design.md インストールの処理順1〜6)。
@@ -85,7 +109,8 @@ enum Installer {
         fileManager: FileManager = .default,
         resolveSelfExecutablePath: () -> String? = Self.defaultResolveSelfExecutablePath,
         defaultIconData: () -> Data = { DefaultIcon.pngData },
-        runProcess: ProcessRunner = Self.defaultRunProcess
+        runProcess: ProcessRunner = Self.defaultRunProcess,
+        launchDetached: DetachedProcessLauncher = Self.defaultLaunchDetached
     ) throws -> InstallOutcome {
         let naming = try ProfileNaming.resolve(profile: profile, homeDirectory: homeDirectory)
         let resolvedBinDirectory =
@@ -207,7 +232,16 @@ enum Installer {
                 "Running --help on the installed command exited with code \(helpExitCode)")
         }
 
-        return InstallOutcome(replacedExistingBundle: bundleExisted, iconChanged: iconChanged)
+        // 7. 新規インストールのときだけ確認用の通知を出す (Requirement 20.1, 20.4)。応答は待たず、
+        //    起動できなくてもインストールの成否・終了コードを変えない (20.2, 20.3)。
+        let sentConfirmationNotification =
+            bundleExisted ? false : launchDetached(naming.machOPath, ConfirmationNotification.arguments)
+
+        return InstallOutcome(
+            replacedExistingBundle: bundleExisted,
+            iconChanged: iconChanged,
+            sentConfirmationNotification: sentConfirmationNotification
+        )
     }
 
     /// `uninstall` の結果 (Requirement 19.7, 19.8)。
@@ -275,6 +309,25 @@ enum Installer {
         guard _NSGetExecutablePath(&buffer, &size) == 0 else { return nil }
         let path = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    }
+
+    /// 完了を待たずに外部実行ファイルを起動する既定実装 (Requirement 20.2)。
+    ///
+    /// 標準入出力は `/dev/null` へ向ける。待たない以上この子プロセスは親の終了後も生き続けるため
+    /// (実測)、継承したままだとタイムアウト時の結果JSONが数十秒後に呼び出し元のstdoutへ紛れ込む。
+    private static func defaultLaunchDetached(_ executablePath: String, _ arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// `Process` で外部実行ファイルを起動し、終了コードを返す既定実装。
