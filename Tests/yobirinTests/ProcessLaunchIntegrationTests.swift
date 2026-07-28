@@ -252,6 +252,98 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
     // (Requirement 11.6 の署名失敗はInstallerTestsのfakeでカバー済み。本ファイルでは
     // 実プロセス起動でも安全に再現できるアイコン不在のケースのみを扱う。)
 
+    // MARK: - C. 透過ディスパッチ (バンドル外の実プロセスから、偽インストール済みバンドルへの引き継ぎ)
+    // (design.md 透過ディスパッチの詳細、Requirements 17.1, 17.2, 17.4, 17.5)
+
+    /// `<homeDirectory>/Applications/Yobirin.app/Contents/MacOS/yobirin` に `/bin/echo` の
+    /// コピーを実行可能なスタブとして配置し、`Contents/Info.plist` を添える。echoは自身のargv
+    /// (argv[0]を除く) をそのままstdoutへ出力するため、引き継ぎ後の引数透過を検証できる。
+    ///
+    /// `/bin/echo` はApple platform署名のバイナリで、コピー先のパスがトラストキャッシュの
+    /// 想定パスと異なるとSIGKILLされる (実測)。`Installer.install` と同じ
+    /// `codesign --force --sign -` (ad-hoc署名) でコピー先の実行を可能にする。
+    private func makeFakeInstalledBundle(homeDirectory: URL, version: String) throws {
+        let macOSDirectory =
+            homeDirectory
+            .appendingPathComponent("Applications/Yobirin.app/Contents/MacOS")
+        try FileManager.default.createDirectory(
+            at: macOSDirectory, withIntermediateDirectories: true)
+        let stubPath = macOSDirectory.appendingPathComponent("yobirin")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: stubPath)
+
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", stubPath.path]
+        sign.standardOutput = FileHandle.nullDevice
+        sign.standardError = FileHandle.nullDevice
+        try sign.run()
+        sign.waitUntilExit()
+        precondition(sign.terminationStatus == 0, "failed to ad-hoc sign the fake stub")
+
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": ProfileNaming.defaultBundleID,
+            "CFBundleShortVersionString": version,
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(
+            to: macOSDirectory.deletingLastPathComponent()
+                .appendingPathComponent("Info.plist"))
+    }
+
+    private func environmentWithFakeInstalledBundle(homeDirectory: URL) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment[ProfileNaming.homeEnvironmentKey] = homeDirectory.path
+        return environment
+    }
+
+    func testOutsideBundleWithNotificationArgumentsHandsOffToInstalledBundleWithArgumentPassthrough()
+        throws
+    {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-handoff-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try makeFakeInstalledBundle(homeDirectory: tempRoot, version: YobirinVersion.current)
+
+        let result = try runYobirin(
+            arguments: ["--title", "t", "--message", "m"],
+            environment: environmentWithFakeInstalledBundle(homeDirectory: tempRoot))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stdout.contains("--title t --message m"))
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
+    func testOutsideBundleWithMismatchedBundleVersionPrintsUpdateNoticeToStderr() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-handoff-version-mismatch-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try makeFakeInstalledBundle(homeDirectory: tempRoot, version: "0.0.1-does-not-exist")
+
+        let result = try runYobirin(
+            arguments: ["--title", "t", "--message", "m"],
+            environment: environmentWithFakeInstalledBundle(homeDirectory: tempRoot))
+
+        XCTAssertTrue(result.stderr.contains("run 'yobirin install'"))
+        XCTAssertTrue(result.stdout.contains("--title t --message m"))
+    }
+
+    func testOutsideBundleWithMatchingBundleVersionPrintsNoUpdateNotice() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-handoff-version-match-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try makeFakeInstalledBundle(homeDirectory: tempRoot, version: YobirinVersion.current)
+
+        let result = try runYobirin(
+            arguments: ["--title", "t", "--message", "m"],
+            environment: environmentWithFakeInstalledBundle(homeDirectory: tempRoot))
+
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
     func testInstallOutsideBundleFailsWithNonZeroAndStderrWhenIconPathDoesNotExist() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("yobirin-install-process-test-\(UUID().uuidString)")

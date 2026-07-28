@@ -229,7 +229,7 @@
   - _Requirements: 16.1, 16.2, 16.3, 16.4, 16.5_
   - _Boundary: Installer, InstallCommand_
 
-- [ ] 13. Core: バンドル外バイナリからの透過ディスパッチ
+- [x] 13. Core: バンドル外バイナリからの透過ディスパッチ
 - [x] 13.1 ホーム解決の一元化とディスパッチ判定を実装する
   - `ProfileNaming` のホームディレクトリ解決を `YOBIRIN_HOME` 環境変数 (未設定時は従来どおり) へ一元化し、ListCommand / PsCommand / Installer の解決呼び出しも同じ経路へ揃える
   - 既存のバンドル外プロセステストへ `YOBIRIN_HOME` を付与し、実マシンのインストール状態から独立させる
@@ -240,7 +240,7 @@
   - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.6, 17.7_
   - _Boundary: Yobirin (LaunchGate), ProfileDispatch (ProfileNaming), BundleEnvironment, ListCommand, PsCommand, Installer (ホーム解決の呼び出し箇所のみ)_
 
-- [ ] 13.2 引き継ぎを結線して確認する
+- [x] 13.2 引き継ぎを結線して確認する
   - エントリポイントへ実際のバンドル存在判定を配線し、ゲート決定に応じてバンドル内Mach-Oへexecvで引き継ぐ (argv[0]差し替え・引数の透過・バージョン不一致のstderr案内・exec失敗の環境エラー)
   - `YOBIRIN_HOME` のテンポラリ領域に偽バンドル (実行可能なスタブ) を置いた結合テストで、引き継ぎの引数透過・バージョン不一致のstderr案内・未インストール時の案内fallbackが確認できる
   - manual-verification.md と design.md の手動検証チェックリストへ透過ディスパッチの項目 (素のバイナリからの通知配信・引数なし掃除の引き継ぎ・バージョン不一致案内の目視) を追記して実施する

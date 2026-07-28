@@ -1,4 +1,5 @@
 import ArgumentParser
+import Darwin
 import Foundation
 
 /// プロセスの実エントリポイント。起動ゲート (design.md 起動ゲートとインストールのフロー、
@@ -18,10 +19,8 @@ enum YobirinMain {
         let decision = LaunchGate.decide(
             arguments: CommandLine.arguments,
             isOutsideBundle: BundleEnvironment.isOutsideBundle(),
-            // task 13.1 では純粋関数の拡張のみを行い、実際のバンドル存在判定の配線は
-            // task 13.2 で行う。ここを固定 `false` にしている限り `.execInstalledBundle` は
-            // 返らず、mainの挙動は本タスクで変化しない。
-            isDefaultBundleInstalled: false
+            isDefaultBundleInstalled: FileManager.default.fileExists(
+                atPath: ProfileNaming.default().machOPath)
         )
         switch decision {
         case .sweepOrphans:
@@ -32,9 +31,7 @@ enum YobirinMain {
             FileHandle.standardError.write(Data((installGuideMessage + "\n").utf8))
             exit(ResultEmitter.environmentErrorExitCode)
         case .execInstalledBundle:
-            // 実配線 (execv引き継ぎ・バージョン不一致案内) はtask 13.2で行う。上記のとおり
-            // `isDefaultBundleInstalled: false` を渡しているため到達しない。
-            fatalError("execInstalledBundle handoff is wired in task 13.2")
+            BundleHandoff.execDefaultBundle()
         }
     }
 
@@ -116,6 +113,46 @@ enum BundleVersionCheck {
         return
             "note: installed bundle is \(installedVersion) but this binary is \(currentVersion); "
             + "run 'yobirin install' to update"
+    }
+}
+
+/// `.execInstalledBundle` 決定時の実引き継ぎ (design.md 透過ディスパッチの詳細、
+/// Requirements 17.1, 17.2, 17.4, 17.5, 17.7)。
+///
+/// argv[0]をデフォルトバンドル内Mach-Oのパスへ差し替えるだけで、残りの引数 (`--profile` を
+/// 含む) はそのまま透過する。バンドル内で起動された `NotifyCommand` が `--profile` を見て
+/// 二段目のディスパッチ (`ProfileDispatch.dispatch`) を行うため、ここでは除去しない
+/// (design.md「--profile 付きの引数もそのまま透過し、バンドル内のNotifyCommand経由で
+/// プロファイルへ二段ディスパッチされる」)。exec機構は `ProfileDispatch.defaultExec` を共用し、
+/// 失敗時の処理は `ProfileDispatch.dispatch` と同型 (理由をstderrへ出し
+/// `environmentErrorExitCode` で終了) にする。引き継ぎ先はバンドル内実行になるため
+/// 再帰は構造的に起きない (17.7)。
+enum BundleHandoff {
+    static func execDefaultBundle(
+        naming: ProfileNaming = .default(),
+        arguments: [String] = CommandLine.arguments,
+        currentVersion: String = YobirinVersion.current,
+        fileManager: FileManager = .default,
+        stderrWriter: (String) -> Void = Self.defaultStderrWriter,
+        exit: (Int32) -> Void = { Darwin.exit($0) },
+        exec: ProfileDispatch.Exec = ProfileDispatch.defaultExec
+    ) {
+        if let notice = BundleVersionCheck.updateNotice(
+            bundlePath: naming.bundlePath, currentVersion: currentVersion, fileManager: fileManager
+        ) {
+            stderrWriter(notice)
+        }
+
+        exec(naming.machOPath, [naming.machOPath] + arguments.dropFirst())
+
+        // execvはプロセス置換に成功すると返らない。ここに到達するのは失敗時のみ。
+        stderrWriter(
+            "Failed to hand off to installed bundle: \(String(cString: strerror(errno)))")
+        exit(ResultEmitter.environmentErrorExitCode)
+    }
+
+    private static func defaultStderrWriter(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 }
 
