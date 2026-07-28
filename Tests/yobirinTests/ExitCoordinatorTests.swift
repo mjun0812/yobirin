@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 @testable import yobirin
@@ -99,5 +100,35 @@ final class ExitCoordinatorTests: XCTestCase {
         scheduler.fireLast()
 
         XCTAssertEqual(writeCount, 1)
+    }
+
+    // MARK: - Flush: 結果はプロセス終了 (遅延exit) を待たずパイプの消費者へ到達する (Requirement 18.1)
+
+    func testDefaultWriterFlushesStdoutSoAPipeConsumerReceivesTheResultImmediately() {
+        // fd 1をパイプへ差し替えると、stdioはフルバッファになる (ttyの行バッファと異なる)。
+        // flushしない実装では書き込みがバッファに滞留し、ここでの非ブロッキングreadで何も読めない。
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&fds), 0)
+        fflush(stdout)
+        let savedStdout = dup(STDOUT_FILENO)
+        dup2(fds[1], STDOUT_FILENO)
+
+        ExitCoordinator.defaultWriter(.stdout, "{\"result\":\"clicked\"}")
+
+        let flags = fcntl(fds[0], F_GETFL)
+        _ = fcntl(fds[0], F_SETFL, flags | O_NONBLOCK)
+        var buffer = [UInt8](repeating: 0, count: 256)
+        let count = read(fds[0], &buffer, buffer.count)
+
+        // アサート前にfd 1を復元する (失敗メッセージがパイプへ吸われないように)
+        fflush(stdout)
+        dup2(savedStdout, STDOUT_FILENO)
+        close(savedStdout)
+        close(fds[0])
+        close(fds[1])
+
+        XCTAssertGreaterThan(count, 0, "the result must be readable from the pipe before process exit")
+        let received = String(decoding: buffer.prefix(max(count, 0)), as: UTF8.self)
+        XCTAssertEqual(received, "{\"result\":\"clicked\"}\n")
     }
 }

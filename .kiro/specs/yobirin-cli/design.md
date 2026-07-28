@@ -334,6 +334,7 @@ yobirin ps
 - `applicationDidFinishLaunching` で `requestAuthorization` → 認可コールバック後に通知配信とタイムアウトタイマー開始 (許可ダイアログ表示中はタイムアウトが進まない。`--timeout 5` で48秒待った実測に基づく)
 - 通知許可の拒否は `granted == false` ではなく `UNErrorDomain Code=1` のエラーとして返る (未許可状態と同じエラーで区別不能)。**error分岐と `granted == false` 分岐の両方で exit 2** とする
 - 結果出力後、0.5〜1秒の遅延を置いて `exit 0` (即exitするとmacOSがアプリを再起動し、デフォルト値のまま通知を1件出してしまう。実測)
+- stdoutへの結果書き込みは直後にflushする (出力先がパイプの場合stdioはフルバッファになり、flushしないと結果JSONが遅延exit後のプロセス終了まで消費者へ到達しない。実測。Requirement 18)
 - 引数なし起動時は、応答待ちの主がいない配信済み通知を掃除して即exit (孤児通知クリックによる再起動への防御)
 
 ### Notification

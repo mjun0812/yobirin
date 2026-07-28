@@ -248,6 +248,14 @@
   - _Requirements: 17.1, 17.2, 17.4, 17.5, 17.7_
   - _Depends: 13.1_
 
+- [x] 14. 結果出力の即時flushを実装する
+  - `ExitCoordinator.defaultWriter` のstdout書き込み直後にflushし、出力先がパイプでも結果JSONが遅延exitを待たず消費者へ到達するようにする
+  - fd 1をパイプへ差し替えた単体テストで「書き込み直後・プロセス終了前にパイプから結果が読める」ことを検証する (flushなしの現行実装では失敗するテストを先に書く)
+  - 遅延exitのスケジュールと終了コードは変わらない (既存のExitCoordinatorTestsが全green)
+  - 実機のパイプ計測で、結果JSONの到着がプロセス終了より遅延exit分 (約1秒) 早いことを確認する
+  - _Requirements: 18.1, 18.2_
+  - _Boundary: ExitCoordinator_
+
 ## Implementation Notes
 
 - 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい

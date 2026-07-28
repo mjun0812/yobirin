@@ -32,10 +32,14 @@ enum ExitCoordinator {
     }
 
     /// 実装先の書き込み。stdoutは `print`、stderrは標準エラーへ改行付きで書き込む。
+    ///
+    /// stdoutは書き込み直後にflushする。出力先がパイプの場合stdioはフルバッファになり、
+    /// flushしないと結果JSONが遅延exit後のプロセス終了まで消費者へ到達しない (Requirement 18.1)。
     static func defaultWriter(_ destination: OutputDestination, _ text: String) {
         switch destination {
         case .stdout:
             print(text)
+            fflush(stdout)
         case .stderr:
             FileHandle.standardError.write(Data((text + "\n").utf8))
         }
