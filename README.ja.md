@@ -208,8 +208,8 @@ $ yobirin --profile claude --title "Claude" --message "完了"
 ```console
 $ yobirin list
 PROFILE    BUNDLE ID                    VERSION  PATH
-(default)  com.mjun0812.yobirin         1.0.0    /Users/you/Applications/Yobirin.app
-claude     com.mjun0812.yobirin.claude  1.0.0    /Users/you/Applications/Yobirin-Claude.app
+(default)  com.mjun0812.yobirin         1.0.1    /Users/you/Applications/Yobirin.app
+claude     com.mjun0812.yobirin.claude  1.0.1    /Users/you/Applications/Yobirin-Claude.app
 ```
 
 ## 既知の制限
