@@ -105,6 +105,17 @@ If you downloaded the binary from the Releases page with a browser, macOS attach
 $ xattr -d com.apple.quarantine ./yobirin
 ```
 
+### With mise
+
+[mise](https://mise.jdx.dev/) can fetch it through the ubi backend. Run `install` once with the fetched binary and setup is done:
+
+```console
+$ mise use -g ubi:mjun0812/yobirin
+$ yobirin install
+```
+
+What mise places on `PATH` is the bare binary, but once `install` has run, notification requests are handed off to the installed bundle automatically, so `yobirin --title ...` just works. After upgrading through mise, re-run `yobirin install` to update the bundle as well (the CLI tells you when that is needed).
+
 ### From source
 
 ```console

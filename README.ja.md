@@ -105,6 +105,17 @@ $ ./yobirin install
 $ xattr -d com.apple.quarantine ./yobirin
 ```
 
+### miseから
+
+[mise](https://mise.jdx.dev/) のubiバックエンドでも取得できます。取得したバイナリで `install` を一度実行すればセットアップは完了です:
+
+```console
+$ mise use -g ubi:mjun0812/yobirin
+$ yobirin install
+```
+
+miseが配置するのは素のバイナリですが、`install` 済みであれば通知要求は自動的にインストール済みバンドルへ引き継がれるので、そのまま `yobirin --title ...` が使えます。miseでバージョンを上げたときは、`yobirin install` を再実行してバンドル側も更新してください (更新が必要なときはCLIがその旨を表示します)。
+
 ### ソースから
 
 ```console
