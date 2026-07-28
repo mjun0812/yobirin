@@ -208,8 +208,8 @@ Installed bundles can be listed with `yobirin list` (`--json` supported):
 ```console
 $ yobirin list
 PROFILE    BUNDLE ID                    VERSION  PATH
-(default)  com.mjun0812.yobirin         1.0.1    /Users/you/Applications/Yobirin.app
-claude     com.mjun0812.yobirin.claude  1.0.1    /Users/you/Applications/Yobirin-Claude.app
+(default)  com.mjun0812.yobirin         1.1.0    /Users/you/Applications/Yobirin.app
+claude     com.mjun0812.yobirin.claude  1.1.0    /Users/you/Applications/Yobirin-Claude.app
 ```
 
 ## Known limitations
