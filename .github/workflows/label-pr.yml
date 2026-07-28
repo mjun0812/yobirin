@@ -1,0 +1,61 @@
+name: Label PR
+
+# PRタイトルのConventional Commits (`feat(cli)!: ...`) からラベルを付ける。
+# リリースノートの分類は `.github/release.yml` がこのラベルを見るため、
+# ラベル付けを手作業にすると分類が抜ける。
+#
+# `pull_request_target` はfork由来のPRでも書き込み権限のあるトークンで動く。
+# PRのコードはcheckoutせず、タイトルも環境変数経由で渡してスクリプト差し込みを避ける。
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    name: Apply a label from the PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # `type(scope)!: subject` を分解する。規約に沿わないタイトルは何もしない。
+          if [[ ! $TITLE =~ ^([a-z]+)(\([^\)]*\))?(!)?: ]]; then
+            echo "Title is not a Conventional Commit; leaving labels untouched: $TITLE"
+            exit 0
+          fi
+          type="${BASH_REMATCH[1]}"
+          breaking="${BASH_REMATCH[3]}"
+
+          if [[ -n $breaking ]]; then
+            label=breaking
+          else
+            case "$type" in
+              feat) label=feat ;;
+              fix) label=fix ;;
+              perf) label=perf ;;
+              refactor) label=refactor ;;
+              docs) label=docs ;;
+              *) label=chore ;;
+            esac
+          fi
+
+          # タイトルが編集された場合に古い種別ラベルが残らないよう、管理下のラベルを一度外す。
+          managed=(breaking feat fix perf refactor docs chore)
+          current="$(gh pr view "$NUMBER" --repo "$REPO" --json labels --jq '.labels[].name')"
+          for name in "${managed[@]}"; do
+            if [[ $name != "$label" ]] && grep -qx "$name" <<<"$current"; then
+              gh pr edit "$NUMBER" --repo "$REPO" --remove-label "$name"
+            fi
+          done
+
+          gh pr edit "$NUMBER" --repo "$REPO" --add-label "$label"
+          echo "Applied label: $label"

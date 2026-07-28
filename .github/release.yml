@@ -1,0 +1,31 @@
+# GitHubの自動生成リリースノート (`gh release create --generate-notes`) の分類設定。
+#
+# 分類キーはマージ済みPRに付いた**ラベル**であり、コミットメッセージのprefixは参照されない。
+# ラベルはPRタイトルのConventional Commitsから `.github/workflows/label-pr.yml` が自動で付ける。
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking
+    - title: Features
+      labels:
+        - feat
+    - title: Bug Fixes
+      labels:
+        - fix
+    - title: Performance
+      labels:
+        - perf
+    - title: Refactoring
+      labels:
+        - refactor
+    - title: Documentation
+      labels:
+        - docs
+    # 上記以外のラベル・ラベル無しのPRはすべてここへ入る (catch-allは必ず最後に置く)
+    - title: Other Changes
+      labels:
+        - "*"
