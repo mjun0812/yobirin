@@ -107,10 +107,10 @@ $ xattr -d com.apple.quarantine ./yobirin
 
 ### miseから
 
-[mise](https://mise.jdx.dev/) のubiバックエンドでも取得できます。取得したバイナリで `install` を一度実行すればセットアップは完了です:
+[mise](https://mise.jdx.dev/) のgithubバックエンドでも取得できます。取得したバイナリで `install` を一度実行すればセットアップは完了です:
 
 ```console
-$ mise use -g ubi:mjun0812/yobirin
+$ mise use -g github:mjun0812/yobirin
 $ yobirin install
 ```
 

@@ -107,10 +107,10 @@ $ xattr -d com.apple.quarantine ./yobirin
 
 ### With mise
 
-[mise](https://mise.jdx.dev/) can fetch it through the ubi backend. Run `install` once with the fetched binary and setup is done:
+[mise](https://mise.jdx.dev/) can fetch it through the github backend. Run `install` once with the fetched binary and setup is done:
 
 ```console
-$ mise use -g ubi:mjun0812/yobirin
+$ mise use -g github:mjun0812/yobirin
 $ yobirin install
 ```
 
