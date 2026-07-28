@@ -129,8 +129,11 @@ Upgrading is just re-running `yobirin install`. The old bundle is removed before
 
 ## Notification permission
 
-On first run, macOS shows a permission dialog for "Yobirin". Click **Allow**.
+Running `yobirin install` sends one confirmation notification, and macOS shows a permission dialog for "Yobirin". Click **Allow**. This lets you confirm that notifications get through before you actually depend on them.
 
+- The confirmation notification is sent only on a fresh install. Reinstalling over the same bundle does not send one
+- The install does not wait for the confirmation notification. It succeeds even where notifications cannot be received (CI, a package manager's postinstall, and so on)
+- Each profile is a separate bundle and needs its own permission. `install --profile <name>` sends a confirmation notification the same way
 - The dialog only appears when the bundle lives in a proper location such as `~/Applications`. The installer places it there, so you normally don't need to think about this
 - While the dialog is open, `--timeout` does not advance. The timer starts only after permission is resolved
 - If permission is denied (including turning it off later), yobirin prints the reason to stderr and exits with code `2`, without emitting JSON. Re-enable it under System Settings > Notifications > Yobirin

@@ -267,6 +267,18 @@
   - _Requirements: 19.1, 19.2, 19.3, 19.4, 19.5, 19.6, 19.7, 19.8_
   - _Boundary: Installer, UninstallCommand, Yobirin (LaunchGate許可リスト・サブコマンド登録)_
 
+- [x] 16. インストール直後の確認用通知を実装する
+  - `Installer` へ「起動するだけで待たない」注入点を追加し、既存の `ProcessRunner` (codesign実行・署名検証・`--help` 起動検証・lsregister解除で共有) とは別経路にする
+  - 新規インストール (既存バンドルの置き換えではない) のときだけ、配置したバンドルのMach-Oを確認用の通知引数 (タイトル・本文・正のタイムアウト) 付きで起動する。正のタイムアウトにより、応答がなければ既存のタイムアウト処理 (Requirement 5.2) が通知センターから削除する
+  - 起動に失敗しても無視し、インストールの成否・終了コードを変えない
+  - installの結果へ「確認用の通知を出したか」を加え、InstallCommandは出したときだけ完了メッセージに続けて確認先の案内をstdoutへ出す
+  - `InstallOutcome` のフィールド追加に伴い、既存のInstallCommandTestsのリテラル生成箇所 (10箇所) を新シグネチャへ追従させる
+  - テンポラリ領域のテストで、新規/置き換えの発行有無・待たない注入点が使われること・渡す引数・起動失敗時の継続・案内の有無が確認でき、`swift test` が全green
+  - 実機で未導入プロファイルを新規作成し、当該アイコンで確認用通知が表示され、installが応答を待たずに完了すること、再インストールでは通知が出ないこと、応答しなければ通知センターに残らないことを確認する
+  - READMEの「通知の許可」節を、許可ダイアログが初回実行時ではなく `install` 時に出る前提へ更新する (日本語版・英語版とも)
+  - _Requirements: 20.1, 20.2, 20.3, 20.4, 20.5, 20.6_
+  - _Boundary: Installer, InstallCommand, README (通知の許可の記述)_
+
 ## Implementation Notes
 
 - 1.2: ユーザーのグローバルgitignoreの `Icon` パターンがcase-insensitive FSで `assets/icon/` にマッチする。プロジェクト .gitignore の `!assets/icon/` で打ち消し済み。今後 assets/icon/ 配下へファイルを足すタスク (4.3等) はこの前提でよい

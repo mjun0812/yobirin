@@ -44,7 +44,8 @@ final class InstallCommandTests: XCTestCase {
             icon: nil,
             install: { profile, icon in
                 installCalls.append((profile, icon))
-                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                return Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { stderrMessages.append($0) },
@@ -66,7 +67,8 @@ final class InstallCommandTests: XCTestCase {
             icon: nil,
             install: { profile, icon in
                 installCalls.append((profile, icon))
-                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                return Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { _ in },
@@ -86,7 +88,8 @@ final class InstallCommandTests: XCTestCase {
             icon: nil,
             install: { profile, icon in
                 installCalls.append((profile, icon))
-                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                return Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { _ in },
@@ -107,7 +110,8 @@ final class InstallCommandTests: XCTestCase {
             icon: "/tmp/icon.png",
             install: { profile, icon in
                 installCalls.append((profile, icon))
-                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                return Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { _ in },
@@ -127,7 +131,8 @@ final class InstallCommandTests: XCTestCase {
             icon: nil,
             install: { profile, icon in
                 installCalls.append((profile, icon))
-                return Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                return Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { _ in },
@@ -170,7 +175,8 @@ final class InstallCommandTests: XCTestCase {
             profile: nil,
             icon: nil,
             install: { _, _ in
-                Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { _ in },
             stderrWriter: { stderrMessages.append($0) },
@@ -192,7 +198,8 @@ final class InstallCommandTests: XCTestCase {
             profile: nil,
             icon: nil,
             install: { _, _ in
-                Installer.InstallOutcome(replacedExistingBundle: false, iconChanged: false)
+                Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { stdoutMessages.append($0) },
             stderrWriter: { stderrMessages.append($0) },
@@ -214,7 +221,8 @@ final class InstallCommandTests: XCTestCase {
             profile: nil,
             icon: nil,
             install: { _, _ in
-                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: false)
+                Installer.InstallOutcome(
+                    replacedExistingBundle: true, iconChanged: false, sentConfirmationNotification: false)
             },
             stdoutWriter: { stdoutMessages.append($0) },
             stderrWriter: { stderrMessages.append($0) },
@@ -236,7 +244,8 @@ final class InstallCommandTests: XCTestCase {
             profile: nil,
             icon: nil,
             install: { _, _ in
-                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: true)
+                Installer.InstallOutcome(
+                    replacedExistingBundle: true, iconChanged: true, sentConfirmationNotification: false)
             },
             stdoutWriter: { stdoutMessages.append($0) },
             stderrWriter: { stderrMessages.append($0) },
@@ -262,7 +271,8 @@ final class InstallCommandTests: XCTestCase {
             profile: nil,
             icon: nil,
             install: { _, _ in
-                Installer.InstallOutcome(replacedExistingBundle: true, iconChanged: true)
+                Installer.InstallOutcome(
+                    replacedExistingBundle: true, iconChanged: true, sentConfirmationNotification: false)
             },
             stdoutWriter: { stdoutMessages.append($0) },
             stderrWriter: { stderrMessages.append($0) },
@@ -275,5 +285,53 @@ final class InstallCommandTests: XCTestCase {
         XCTAssertTrue(stdoutMessages[1].contains("log out"))
         XCTAssertTrue(stderrMessages.isEmpty)
         XCTAssertTrue(exitCodes.isEmpty)
+    }
+
+    // MARK: - Confirmation notification guidance (Requirement 20.5)
+
+    func testPerformGuidesAboutTheConfirmationNotificationWhenItWasSent() {
+        var stdoutMessages: [String] = []
+        var stderrMessages: [String] = []
+        var exitCodes: [Int32] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false,
+                    sentConfirmationNotification: true)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { stderrMessages.append($0) },
+            exit: { exitCodes.append($0) }
+        )
+
+        XCTAssertEqual(stdoutMessages.count, 2)
+        XCTAssertTrue(stdoutMessages[0].contains("Installation complete"))
+        XCTAssertTrue(stdoutMessages[1].contains("confirmation notification"))
+        XCTAssertTrue(stdoutMessages[1].contains("System Settings"))
+        XCTAssertTrue(stderrMessages.isEmpty)
+        XCTAssertTrue(exitCodes.isEmpty, "案内の有無は終了コードを変えてはならない (20.3)")
+    }
+
+    func testPerformDoesNotGuideWhenNoConfirmationNotificationWasSent() {
+        var stdoutMessages: [String] = []
+
+        InstallCommand.perform(
+            profile: nil,
+            icon: nil,
+            install: { _, _ in
+                Installer.InstallOutcome(
+                    replacedExistingBundle: false, iconChanged: false,
+                    sentConfirmationNotification: false)
+            },
+            stdoutWriter: { stdoutMessages.append($0) },
+            stderrWriter: { _ in },
+            exit: { _ in }
+        )
+
+        XCTAssertEqual(stdoutMessages.count, 1)
+        XCTAssertTrue(stdoutMessages[0].contains("Installation complete"))
     }
 }
