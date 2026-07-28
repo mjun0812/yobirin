@@ -268,17 +268,13 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
             .appendingPathComponent("Applications/Yobirin.app/Contents/MacOS")
         try FileManager.default.createDirectory(
             at: macOSDirectory, withIntermediateDirectories: true)
+        // スタブは受け取った引数をそのままstdoutへ出すシェルスクリプトにする。Apple署名済み
+        // バイナリ (/bin/echo等) の複製は、ad-hoc再署名してもCI環境ではSIGKILLされる (実測)。
+        // shebangスクリプトなら署名を要さず、execvがそのまま解釈するため環境に依存しない。
         let stubPath = macOSDirectory.appendingPathComponent("yobirin")
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: stubPath)
-
-        let sign = Process()
-        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        sign.arguments = ["--force", "--sign", "-", stubPath.path]
-        sign.standardOutput = FileHandle.nullDevice
-        sign.standardError = FileHandle.nullDevice
-        try sign.run()
-        sign.waitUntilExit()
-        precondition(sign.terminationStatus == 0, "failed to ad-hoc sign the fake stub")
+        try "#!/bin/sh\necho \"$@\"\n".write(to: stubPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: stubPath.path)
 
         let plist: [String: Any] = [
             "CFBundleIdentifier": ProfileNaming.defaultBundleID,
