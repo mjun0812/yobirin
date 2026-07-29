@@ -138,7 +138,7 @@ graph TB
 | Notification | UserNotifications (macOS 13+) | 通知許可の状態取得 (`doctor`)、配信済み通知の削除 (`sweep`) | 既存依存                                        |
 | Runtime      | Darwin (`isatty`)             | 端末接続の判定                                              | 新規に使用するシステムコール                    |
 
-新規の外部依存はない。`CompletionShell` は `ExpressibleByArgument` に適合していないため、本リポジトリ側で適合を宣言する (research.md R-3)。
+新規の外部依存はない。`CompletionShell` は `ExpressibleByArgument` に適合していないが、retroactive conformance は本リポジトリの swift-format 設定が禁じているため、シェル名は文字列で受けて `init?(rawValue:)` で解決する (research.md R-3)。
 
 ## File Structure Plan
 
@@ -148,7 +148,7 @@ graph TB
 Sources/yobirin/
 ├── TimeoutDuration.swift      # タイムアウト文字列 → 秒数の変換 (純粋関数、Foundation のみ)
 ├── TerminalDetection.swift    # ファイルディスクリプタの端末接続判定 (isatty の唯一の呼び出し元)
-├── CompletionCommand.swift    # completion サブコマンド + CompletionShell の ExpressibleByArgument 適合
+├── CompletionCommand.swift    # completion サブコマンド (シェル名の解決とスクリプト出力)
 ├── SweepCommand.swift         # sweep サブコマンド (孤児通知の明示的な削除)
 └── DoctorCommand.swift        # doctor サブコマンド (診断項目の収集・判定・整形)
 ```
@@ -171,6 +171,7 @@ Sources/yobirin/
 | `Sources/yobirin/ProfileDispatch.swift`          | `buildExecArguments` の除去対象に短縮形を追加                                                                                                                                   | 6.6                          |
 | `Sources/yobirin/PsCommand.swift`                | argv 解釈の短縮形対応、タイムアウト変換の委譲、`--profile` フィルタ、`TIMEOUT` 列の整形                                                                                         | 14                           |
 | `Sources/yobirin/LaunchGuard.swift`              | 削除件数を呼び出し元へ返す形へ分離                                                                                                                                              | 12.5                         |
+| `Sources/yobirin/Installer.swift`                | PATH上のリンク先ディレクトリ解決を静的ヘルパへ集約 (install / uninstall / doctor が共有する単一ソース)。既存の重複2箇所も置換                                                   | 15.3                         |
 | `Sources/yobirin/NotificationCenterClient.swift` | 通知許可の状態を**読み取る**メソッドの追加 (`doctor` 用)。既存の `requestAuthorization` は許可ダイアログを出すため診断には使えない                                              | 15.4                         |
 | `README.md` / `README.ja.md`                     | 終了コード表、`--print`、補完の設定手順、`sweep` による復旧手順、`doctor`                                                                                                       | 8.7, 12.6                    |
 
@@ -695,7 +696,8 @@ extension DoctorCommand {
 **Implementation Notes**
 
 - Integration: `YobirinCommand.completionScript(for:)` の戻り値をそのまま stdout へ書く。生成ロジックは持たない
-- Validation: `extension CompletionShell: ExpressibleByArgument` を宣言する。`init?(rawValue:)` が `zsh` / `bash` / `fish` 以外を `nil` にするため、既定実装がそのまま 8.2 と 8.3 を満たす。`allValueStrings` は `allCases` から導き、ヘルプに候補が並ぶようにする
+- Validation: シェル名は `String` で受け、`CompletionShell(rawValue:)` で解決する。`init?(rawValue:)` が `zsh` / `bash` / `fish` 以外を `nil` にするため、これだけで 8.2 と 8.3 を満たす。受理可能な値の一覧は `CompletionShell.allCases` から導き、ヘルプ文言と拒否時のエラー文言の双方に載せる。列挙を本リポジトリ側で複製しない
+- Validation: **`CompletionShell` を `@Argument` として直接受けない。** そのためには `ExpressibleByArgument` への retroactive conformance が必要になるが、本リポジトリの swift-format 設定が `AvoidRetroactiveConformances` で禁じている (2026-07-30 実測: `swift format lint --strict` がエラーを返す)
 - Risks: `UserNotifications` / `AppKit` を import しない (8.8)
 
 #### PsCommand
