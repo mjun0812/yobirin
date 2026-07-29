@@ -7,7 +7,10 @@ import Foundation
 /// `yobirin --title <str> --message <str> ...` 形式はそのままこのサブコマンドへ解決される
 /// (Requirement 11.8)。
 struct NotifyCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "notify")
+    static let configuration = CommandConfiguration(
+        commandName: "notify",
+        abstract: "Deliver a notification and print the captured response as JSON"
+    )
 
     @Option(help: "The notification title")
     var title: String

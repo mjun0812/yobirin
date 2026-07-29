@@ -1,3 +1,4 @@
+import ArgumentParser
 import XCTest
 
 @testable import yobirin
@@ -71,5 +72,49 @@ final class YobirinCommandTests: XCTestCase {
         XCTAssertNil(notify.replyPlaceholder)
         XCTAssertNil(notify.sound)
         XCTAssertNil(notify.image)
+    }
+}
+
+// MARK: - サブコマンドの登録と説明 (Requirements 7.1, 7.4)
+
+final class YobirinCommandRegistrationTests: XCTestCase {
+    func testCompletionSubcommandIsRegistered() throws {
+        XCTAssertTrue(try YobirinCommand.parseAsRoot(["completion", "zsh"]) is CompletionCommand)
+    }
+
+    func testSweepSubcommandIsRegistered() throws {
+        XCTAssertTrue(try YobirinCommand.parseAsRoot(["sweep"]) is SweepCommand)
+    }
+
+    func testDoctorSubcommandIsRegistered() throws {
+        XCTAssertTrue(try YobirinCommand.parseAsRoot(["doctor"]) is DoctorCommand)
+    }
+
+    /// ヘルプ一覧に説明のないサブコマンドを残さない。
+    func testEverySubcommandHasAnAbstract() throws {
+        for subcommand in YobirinCommand.configuration.subcommands {
+            XCTAssertFalse(
+                subcommand.configuration.abstract.isEmpty,
+                "\(subcommand.configuration.commandName ?? "\(subcommand)") に abstract が無い")
+        }
+    }
+
+    func testRootCommandHasAnAbstract() throws {
+        XCTAssertFalse(YobirinCommand.configuration.abstract.isEmpty)
+    }
+
+    /// 表示文言は英語 (structure.md の既定)。ASCII外の文字が混ざっていないことで確認する。
+    ///
+    /// - Note: `subcommands.map(\.configuration.abstract)` と書くと Swift 6.3.3 の
+    ///   SIL 生成がクラッシュする (existential metatype への key path)。for ループで回避する。
+    func testAbstractsAreWrittenInEnglish() throws {
+        var abstracts = [YobirinCommand.configuration.abstract]
+        for subcommand in YobirinCommand.configuration.subcommands {
+            abstracts.append(subcommand.configuration.abstract)
+        }
+
+        for abstract in abstracts {
+            XCTAssertTrue(abstract.allSatisfy { $0.isASCII }, "英語以外の文字が含まれている: \(abstract)")
+        }
     }
 }

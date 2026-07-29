@@ -16,11 +16,18 @@ enum YobirinMain {
         // symlink経由起動 (CFBundleがバンドルを解決できない) は実体パスへ再execして
         // 直接実行と同一条件に正規化してからゲート判定する (詳細はBundleEnvironment参照)。
         BundleEnvironment.reExecThroughSymlinkIfNeeded()
+        let arguments = CommandLine.arguments
+        // 種別判定はバンドル内でも実行する。分岐に使わない経路でも一度パースするが、
+        // `parseAsRoot` は出力も `run()` の呼び出しも伴わないため副作用がなく、
+        // 「バンドル内では kind が無視される」という `decide` の内部事情に main() を
+        // 依存させないほうが安全 (design.md 起動ゲートの判定)。
         let decision = LaunchGate.decide(
-            arguments: CommandLine.arguments,
+            arguments: arguments,
+            kind: LaunchGate.classify(arguments: arguments),
             isOutsideBundle: BundleEnvironment.isOutsideBundle(),
             isDefaultBundleInstalled: FileManager.default.fileExists(
-                atPath: ProfileNaming.default().machOPath)
+                atPath: ProfileNaming.default().machOPath),
+            isInteractive: TerminalDetection.isAnyStandardStreamTerminal()
         )
         switch decision {
         case .sweepOrphans:
@@ -32,11 +39,29 @@ enum YobirinMain {
             exit(ResultEmitter.environmentErrorExitCode)
         case .execInstalledBundle:
             BundleHandoff.execDefaultBundle()
+        case .showHelp:
+            print(YobirinCommand.helpMessage())
+            exit(0)
         }
     }
 
     private static let installGuideMessage =
         "Running outside the .app bundle. Run 'yobirin install' to install."
+}
+
+/// コマンド種別 (design.md LaunchGate / CommandKind、Requirement 11.1)。
+///
+/// バンドル外で実行を継続してよいかを、引数文字列の位置走査ではなくコマンド解決の結果から
+/// 決めるための分類。位置走査はオプションの**値**とサブコマンド名を区別できず、
+/// `--title install` のような入力でバンドル外の通知APIへ到達してクラッシュしていた
+/// (research.md F1)。
+enum CommandKind: Equatable {
+    /// 通知APIを必要とする (`NotifyCommand` / `SweepCommand`)
+    case requiresBundle
+    /// バンドルが望ましいが、無くても劣化して完走する (`DoctorCommand`。Requirement 15.5)
+    case diagnostic
+    /// 通知APIに触れない。インストール系・一覧系・補完・ヘルプ・バージョン・引数エラーを含む
+    case bundleFree
 }
 
 /// 起動ゲートの判定 (design.md 起動ゲートとインストールのフロー、
@@ -58,36 +83,89 @@ enum LaunchGate {
         /// → バンドル内Mach-Oへ実行を引き継ぐ (Requirements 17.1, 17.2)。実際のexec配線・
         /// バージョン不一致案内は task 13.2 が行う。
         case execInstalledBundle
+        /// 端末からの引数なし起動 → ヘルプを表示して正常終了 (Requirement 12.1)。
+        /// 孤児通知の掃除は明示的な `sweep` サブコマンドが担う。
+        case showHelp
     }
 
-    /// - Parameter isDefaultBundleInstalled: デフォルトバンドルのMach-Oが存在するか
-    ///   (Requirement 17.1, 17.2)。バンドル外で通知系要求・引数なし起動のときのみ参照する。
+    /// 起動の分岐を決める純粋関数 (Requirements 11.3, 11.6, 12.1, 12.2, 15.5)。
+    ///
+    /// 種別の判定 (引数 → `CommandKind`) は `classify` の責務であり、ここでは結果を受け取る
+    /// だけにする。分岐とパースを分けておかないと、この関数がテスト時にも実パーサへ依存する。
+    ///
+    /// - Parameters:
+    ///   - isDefaultBundleInstalled: デフォルトバンドルのMach-Oが存在するか
+    ///     (Requirements 17.1, 17.2)。バンドル外のときのみ参照する。
+    ///   - isInteractive: 標準ストリームのいずれかが端末に接続されているか。引数なし起動の
+    ///     分岐にのみ影響する (Requirements 12.1, 12.2)。
     static func decide(
         arguments: [String],
+        kind: CommandKind,
         isOutsideBundle: Bool,
-        isDefaultBundleInstalled: Bool = false
+        isDefaultBundleInstalled: Bool = false,
+        isInteractive: Bool = false
     ) -> Decision {
-        guard isOutsideBundle else {
-            return LaunchGuard.isArgumentlessLaunch(arguments) ? .sweepOrphans : .runCLI
+        if LaunchGuard.isArgumentlessLaunch(arguments) {
+            // 端末から打たれた引数なし起動は、無言で終わらせずヘルプを見せる (Requirement 12.1)。
+            // 非対話はLaunchServices経由の再起動とみなし、従来どおり孤児通知を掃除する (12.2)。
+            if isInteractive {
+                return .showHelp
+            }
+            guard isOutsideBundle else { return .sweepOrphans }
+            return isDefaultBundleInstalled ? .execInstalledBundle : .guideInstall
         }
-        if isRoutableOutsideBundle(arguments) {
+
+        guard isOutsideBundle else { return .runCLI }
+
+        switch kind {
+        case .bundleFree:
             return .runCLI
+        case .requiresBundle:
+            return isDefaultBundleInstalled ? .execInstalledBundle : .guideInstall
+        case .diagnostic:
+            // 未インストールでも案内で終わらせない。インストール状態そのものが診断対象のため
+            // (Requirement 15.5)。
+            return isDefaultBundleInstalled ? .execInstalledBundle : .runCLI
         }
-        return isDefaultBundleInstalled ? .execInstalledBundle : .guideInstall
     }
 
-    /// バンドル外で継続してよいコマンド種別か (Requirement 12.1: インストール系とヘルプは
-    /// 通知機能に依存せず完了しなければならない)。
+    /// 実行ファイル名を除いた引数列を解決する既定の処理。
     ///
-    /// `--help` / `-h` / `--version` は引数列のどこにあってもArgumentParserが解釈するため
-    /// 位置を問わず検出する。インストール系サブコマンドは実行ファイル名を除く最初の非フラグ引数のみを見る
-    /// (design.md フローチャートの `outCmd` 分岐)。
-    private static func isRoutableOutsideBundle(_ arguments: [String]) -> Bool {
-        let rest = arguments.dropFirst()
-        if rest.contains("--help") || rest.contains("-h") || rest.contains("--version") {
-            return true
+    /// `parseAsRoot` はコマンドのインスタンスを生成するだけで `run()` を呼ばないため、
+    /// 通知APIに触れずバンドル外で安全に呼べる (Requirement 11.4)。
+    ///
+    /// - Important: `parseAsRoot` はパースの一環で `validate()` を実行する (2026-07-30 実測)。
+    ///   そのため `NotifyCommand.validate()` に副作用 (ファイル書き込み・ロック取得・標準入力の
+    ///   消費) を置いてはならない。置くと引き継ぎ前のホップで副作用が起き、引き継ぎ先が
+    ///   壊れる。
+    static func defaultParse(_ arguments: [String]) throws -> ParsableCommand {
+        try YobirinCommand.parseAsRoot(Array(arguments.dropFirst()))
+    }
+
+    /// 引数列からコマンド種別を判定する (Requirements 11.1, 11.2, 11.5, 8.4, 8.6)。
+    ///
+    /// 分類は**返ってきたコマンドの型**で行う。`--help` / `-h` は throw せずヘルプ用コマンドと
+    /// して解決されるため (2026-07-30 実測)、throw の有無で分けると取りこぼす。解決に失敗した
+    /// 場合 (`--version` / 補完スクリプト要求 / 引数エラー) も、バンドルへ引き継がず
+    /// ArgumentParser にその場で処理させるため `bundleFree` とする。
+    ///
+    /// - Note: サブコマンドを追加したら、それがバンドルを必要とするかをここへ反映すること。
+    ///   反映を忘れると `bundleFree` に落ち、バンドル外で通知APIへ到達する。
+    static func classify(
+        arguments: [String],
+        parse: ([String]) throws -> ParsableCommand = defaultParse
+    ) -> CommandKind {
+        guard let command = try? parse(arguments) else {
+            return .bundleFree
         }
-        return ["install", "uninstall", "list", "ps"].contains(rest.first { !$0.hasPrefix("-") })
+        switch command {
+        case is NotifyCommand, is SweepCommand:
+            return .requiresBundle
+        case is DoctorCommand:
+            return .diagnostic
+        default:
+            return .bundleFree
+        }
     }
 }
 
@@ -128,18 +206,24 @@ enum BundleVersionCheck {
 /// `environmentErrorExitCode` で終了) にする。引き継ぎ先はバンドル内実行になるため
 /// 再帰は構造的に起きない (17.7)。
 enum BundleHandoff {
+    /// - Parameter isStandardErrorTerminal: 標準エラーが端末に接続されているか (Requirement 13)。
+    ///   バージョン不一致の案内は、この値が真のときだけ出す。hookから毎回呼ばれる用途で案内が
+    ///   毎回出るとログを埋めるため。exec失敗のような本物のエラーはこの値に関わらず出す。
     static func execDefaultBundle(
         naming: ProfileNaming = .default(),
         arguments: [String] = CommandLine.arguments,
         currentVersion: String = YobirinVersion.current,
         fileManager: FileManager = .default,
+        isStandardErrorTerminal: Bool = TerminalDetection.defaultPredicate(STDERR_FILENO),
         stderrWriter: (String) -> Void = Self.defaultStderrWriter,
         exit: (Int32) -> Void = { Darwin.exit($0) },
         exec: ProfileDispatch.Exec = ProfileDispatch.defaultExec
     ) {
-        if let notice = BundleVersionCheck.updateNotice(
-            bundlePath: naming.bundlePath, currentVersion: currentVersion, fileManager: fileManager
-        ) {
+        if isStandardErrorTerminal,
+            let notice = BundleVersionCheck.updateNotice(
+                bundlePath: naming.bundlePath, currentVersion: currentVersion, fileManager: fileManager
+            )
+        {
             stderrWriter(notice)
         }
 
@@ -163,10 +247,11 @@ enum BundleHandoff {
 struct YobirinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "yobirin",
+        abstract: "Deliver a macOS notification and wait for the response",
         version: YobirinVersion.current,
         subcommands: [
             NotifyCommand.self, InstallCommand.self, UninstallCommand.self, ListCommand.self,
-            PsCommand.self,
+            PsCommand.self, CompletionCommand.self, SweepCommand.self, DoctorCommand.self,
         ],
         defaultSubcommand: NotifyCommand.self
     )

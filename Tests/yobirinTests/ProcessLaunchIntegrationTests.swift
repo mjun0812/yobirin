@@ -311,7 +311,10 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
-    func testOutsideBundleWithMismatchedBundleVersionPrintsUpdateNoticeToStderr() throws {
+    /// バージョン不一致でも、標準エラーがパイプなら案内を出さない (Requirement 13.2)。
+    /// hookから毎回呼ばれる用途でログが埋まるのを避けるため、以前の「常に出す」から変更した。
+    /// 引き継ぎ自体は案内の有無に関わらず成功する (Requirement 13.3)。
+    func testOutsideBundleWithMismatchedBundleVersionSuppressesUpdateNoticeWhenStderrIsNotATerminal() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("yobirin-handoff-version-mismatch-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -322,7 +325,7 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
             arguments: ["--title", "t", "--message", "m"],
             environment: environmentWithFakeInstalledBundle(homeDirectory: tempRoot))
 
-        XCTAssertTrue(result.stderr.contains("run 'yobirin install'"))
+        XCTAssertFalse(result.stderr.contains("run 'yobirin install'"), result.stderr)
         XCTAssertTrue(result.stdout.contains("--title t --message m"))
     }
 

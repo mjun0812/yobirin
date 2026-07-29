@@ -2,235 +2,238 @@ import XCTest
 
 @testable import yobirin
 
-/// 起動ゲートの判定 (design.md 起動ゲートとインストールのフロー、Requirements 12.1, 12.2, 12.3)。
+/// 起動ゲートの分岐判定 (design.md 起動ゲートのフロー、Requirements 11.3, 11.6, 12.1, 12.2, 15.5)。
 ///
-/// `LaunchGate.decide` は「バンドル外検知 → バンドル内なら引数なしガード→ルーティング /
-/// バンドル外ならコマンド種別で分岐」を純粋関数として提供する。`isOutsideBundle` はBool注入
-/// のため、6.1のxctestホスト固有事情 (`Bundle.main.bundleIdentifier` が非nil) に影響されず
-/// 「バンドル外」を明示的にシミュレートできる。
+/// `LaunchGate.decide` は「引数の有無 → 端末接続 → バンドル内外 → コマンド種別」で分岐を決める
+/// 純粋関数。種別の判定 (引数 → `CommandKind`) は `classify` の責務であり、ここでは種別を
+/// 直接与えて分岐だけを検証する。
 final class LaunchGateTests: XCTestCase {
-    // MARK: - Inside bundle: argumentless guard → routing (unchanged from LaunchGuard)
-
-    func testInsideBundleWithNoArgumentsSweepsOrphans() {
-        XCTAssertEqual(LaunchGate.decide(arguments: [], isOutsideBundle: false), .sweepOrphans)
+    private func decide(
+        _ kind: CommandKind,
+        arguments: [String] = ["/path/to/yobirin", "--title", "t", "--message", "m"],
+        isOutsideBundle: Bool,
+        isDefaultBundleInstalled: Bool = false,
+        isInteractive: Bool = false
+    ) -> LaunchGate.Decision {
+        LaunchGate.decide(
+            arguments: arguments,
+            kind: kind,
+            isOutsideBundle: isOutsideBundle,
+            isDefaultBundleInstalled: isDefaultBundleInstalled,
+            isInteractive: isInteractive
+        )
     }
 
-    func testInsideBundleWithExecutableNameOnlySweepsOrphans() {
+    private let argumentless = ["/path/to/yobirin"]
+
+    // MARK: - 引数なし起動 (Requirements 12.1, 12.2)
+
+    /// 端末から `yobirin` とだけ打った利用者には、無言で終わるのではなくヘルプを見せる。
+    func testArgumentlessAndInteractiveShowsHelp() {
         XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin"], isOutsideBundle: false), .sweepOrphans)
-    }
-
-    func testInsideBundleWithNotificationArgumentsRunsCLI() {
+            decide(.bundleFree, arguments: argumentless, isOutsideBundle: false, isInteractive: true),
+            .showHelp)
         XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"], isOutsideBundle: false),
-            .runCLI)
+            decide(.bundleFree, arguments: argumentless, isOutsideBundle: true, isInteractive: true),
+            .showHelp)
     }
 
-    func testInsideBundleWithHelpRunsCLI() {
+    /// 非対話の引数なし起動はLaunchServices経由の再起動とみなし、従来どおり孤児通知を掃除する。
+    func testArgumentlessAndNonInteractiveInsideBundleSweepsOrphans() {
         XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "--help"], isOutsideBundle: false), .runCLI)
+            decide(.bundleFree, arguments: argumentless, isOutsideBundle: false), .sweepOrphans)
     }
 
-    func testInsideBundleWithInstallRunsCLI() {
+    func testArgumentlessAndNonInteractiveOutsideBundleExecsInstalledBundle() {
         XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "install"], isOutsideBundle: false), .runCLI)
-    }
-
-    // MARK: - Outside bundle: notification requests / argumentless launch are guided, not crashed (Requirements 12.2, 12.3)
-
-    func testOutsideBundleWithNoArgumentsGuidesInstall() {
-        XCTAssertEqual(LaunchGate.decide(arguments: [], isOutsideBundle: true), .guideInstall)
-    }
-
-    func testOutsideBundleWithExecutableNameOnlyGuidesInstall() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin"], isOutsideBundle: true), .guideInstall)
-    }
-
-    func testOutsideBundleWithNotificationArgumentsGuidesInstall() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"], isOutsideBundle: true),
-            .guideInstall)
-    }
-
-    func testOutsideBundleWithNotifySubcommandGuidesInstall() {
-        // "notify" は先頭の非フラグ引数だが "install" ではないため、通知系として案内される。
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "notify", "--title", "t"], isOutsideBundle: true),
-            .guideInstall)
-    }
-
-    // MARK: - Outside bundle: install and help proceed without touching notification types (Requirement 12.1)
-
-    func testOutsideBundleWithInstallRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "install"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithInstallAndTrailingOptionsRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "install", "--profile", "claude"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithListRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "list"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithListJSONRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "list", "--json"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithPsRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithUninstallRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "uninstall"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithUninstallProfileRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "uninstall", "--profile", "codex"],
-                isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithPsJSONRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "ps", "--json"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithLeadingBareFlagBeforeInstallStillRunsCLI() {
-        // "install" の判定は「実行ファイル名を除く最初の"非フラグ"引数」であり、
-        // 先行する値を取らないフラグ (例: `--verbose`) の有無に左右されない。
-        // (値を取るオプション、例: `--profile claude` の "claude" は非フラグ引数として
-        // カウントされるため、この判定は「先頭からフラグ以外の値を持つオプション」を
-        // 挟んだ場合までは保証しない。)
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--verbose", "install"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    func testOutsideBundleWithHelpRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "--help"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithShortHelpRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "-h"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithVersionRunsCLI() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "--version"], isOutsideBundle: true), .runCLI)
-    }
-
-    func testOutsideBundleWithHelpAfterSubcommandRunsCLI() {
-        // --help / -h / --version は引数列のどこにあっても検出される。
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: ["/path/to/yobirin", "notify", "--help"], isOutsideBundle: true),
-            .runCLI)
-    }
-
-    // MARK: - Outside bundle × notification/no-args × default bundle installed (Requirements 17.1, 17.2, 17.3)
-
-    func testOutsideBundleWithNoArgumentsAndBundleInstalledExecsInstalledBundle() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: [], isOutsideBundle: true, isDefaultBundleInstalled: true),
+            decide(
+                .bundleFree, arguments: argumentless, isOutsideBundle: true,
+                isDefaultBundleInstalled: true),
             .execInstalledBundle)
     }
 
-    func testOutsideBundleWithNotificationArgumentsAndBundleInstalledExecsInstalledBundle() {
+    func testArgumentlessAndNonInteractiveOutsideBundleWithoutInstallGuidesInstall() {
         XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"],
-                isOutsideBundle: true, isDefaultBundleInstalled: true),
+            decide(.bundleFree, arguments: argumentless, isOutsideBundle: true), .guideInstall)
+    }
+
+    func testEmptyArgumentListIsTreatedAsArgumentless() {
+        XCTAssertEqual(decide(.bundleFree, arguments: [], isOutsideBundle: false), .sweepOrphans)
+    }
+
+    // MARK: - バンドル内は常にArgumentParserへ委ねる
+
+    func testInsideBundleRunsCLIForEveryKind() {
+        for kind in [CommandKind.requiresBundle, .diagnostic, .bundleFree] {
+            XCTAssertEqual(decide(kind, isOutsideBundle: false), .runCLI, "\(kind)")
+        }
+    }
+
+    /// 対話かどうかは引数ありの経路の分岐に影響しない。
+    func testInteractivityDoesNotAffectNonArgumentlessLaunches() {
+        XCTAssertEqual(decide(.bundleFree, isOutsideBundle: false, isInteractive: true), .runCLI)
+    }
+
+    // MARK: - バンドル外 × 通知APIに依存しない種別 (Requirements 11.6, 8.4)
+
+    func testOutsideBundleWithBundleFreeRunsCLIRegardlessOfInstallState() {
+        XCTAssertEqual(decide(.bundleFree, isOutsideBundle: true), .runCLI)
+        XCTAssertEqual(
+            decide(.bundleFree, isOutsideBundle: true, isDefaultBundleInstalled: true), .runCLI)
+    }
+
+    /// 通知APIに依存しない種別に対して引き継ぎや案内を返さないことを不変条件とする。
+    func testBundleFreeNeverHandsOffOrGuides() {
+        for installed in [true, false] {
+            for interactive in [true, false] {
+                let decision = decide(
+                    .bundleFree, isOutsideBundle: true, isDefaultBundleInstalled: installed,
+                    isInteractive: interactive)
+                XCTAssertNotEqual(decision, .execInstalledBundle)
+                XCTAssertNotEqual(decision, .guideInstall)
+            }
+        }
+    }
+
+    // MARK: - バンドル外 × バンドルを必要とする種別 (Requirement 11.3)
+
+    func testOutsideBundleWithRequiresBundleExecsInstalledBundle() {
+        XCTAssertEqual(
+            decide(.requiresBundle, isOutsideBundle: true, isDefaultBundleInstalled: true),
             .execInstalledBundle)
     }
 
-    func testOutsideBundleWithNoArgumentsAndBundleNotInstalledGuidesInstall() {
-        XCTAssertEqual(
-            LaunchGate.decide(arguments: [], isOutsideBundle: true, isDefaultBundleInstalled: false),
-            .guideInstall)
+    func testOutsideBundleWithRequiresBundleGuidesInstallWhenNotInstalled() {
+        XCTAssertEqual(decide(.requiresBundle, isOutsideBundle: true), .guideInstall)
     }
 
-    func testOutsideBundleWithNotificationArgumentsAndBundleNotInstalledGuidesInstall() {
+    func testOmittingBundleInstalledParameterDefaultsToNotInstalled() {
         XCTAssertEqual(
             LaunchGate.decide(
                 arguments: ["/path/to/yobirin", "--title", "t", "--message", "m"],
-                isOutsideBundle: true, isDefaultBundleInstalled: false),
+                kind: .requiresBundle, isOutsideBundle: true),
             .guideInstall)
     }
 
-    func testOmittingBundleInstalledParameterDefaultsToNotInstalledGuidesInstall() {
-        // 既存呼び出し (パラメータ省略) は従来どおりの案内挙動を保つ。
-        XCTAssertEqual(LaunchGate.decide(arguments: [], isOutsideBundle: true), .guideInstall)
+    // MARK: - バンドル外 × 診断 (Requirement 15.5)
+
+    func testOutsideBundleWithDiagnosticExecsInstalledBundleWhenInstalled() {
+        XCTAssertEqual(
+            decide(.diagnostic, isOutsideBundle: true, isDefaultBundleInstalled: true),
+            .execInstalledBundle)
     }
 
-    // MARK: - Outside bundle × install/list/ps/--help/--version are unaffected by bundle install state (Requirement 17.6)
+    /// 診断だけは未インストールでも案内で終わらせない。インストール状態そのものが診断対象のため。
+    func testOutsideBundleWithDiagnosticRunsCLIWhenNotInstalled() {
+        XCTAssertEqual(decide(.diagnostic, isOutsideBundle: true), .runCLI)
+    }
+}
 
-    func testOutsideBundleWithInstallRunsCLIRegardlessOfBundleInstalled() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "install"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+// MARK: - コマンド種別の判定 (Requirements 11.1, 11.2, 11.5, 8.4, 8.6)
+
+/// 種別判定は引数文字列の位置走査ではなく、ルートコマンドの解決結果の型で行う。
+/// 既定の解決処理 (`YobirinCommand.parseAsRoot`) を使い、実際の文法どおりに分類されることを
+/// 確認する。解決処理は注入可能で、失敗ケースの分類も検証する。
+final class LaunchGateClassifyTests: XCTestCase {
+    /// 既存の `decide` と同じく、引数列は実行ファイル名を含む `CommandLine.arguments` 相当。
+    private func classify(_ arguments: [String]) -> CommandKind {
+        LaunchGate.classify(arguments: ["/path/to/yobirin"] + arguments)
     }
 
-    func testOutsideBundleWithListRunsCLIRegardlessOfBundleInstalled() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "list"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+    // MARK: バンドルを必要とする種別
+
+    func testNotifyArgumentsRequireBundle() {
+        XCTAssertEqual(classify(["--title", "t", "--message", "m"]), .requiresBundle)
     }
 
-    func testOutsideBundleWithPsRunsCLIRegardlessOfBundleInstalled() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "ps"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+    func testExplicitNotifySubcommandRequiresBundle() {
+        XCTAssertEqual(classify(["notify", "--title", "t", "--message", "m"]), .requiresBundle)
     }
 
-    /// アンインストールは引き継ぎ先バンドルを消す操作であり、インストール済みでも
-    /// 実行中のバイナリ自身で完結しなければならない (Requirements 17.6, 19.6)。
-    func testOutsideBundleWithUninstallRunsCLIRegardlessOfBundleInstalled() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "uninstall"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+    func testSweepRequiresBundle() {
+        XCTAssertEqual(classify(["sweep"]), .requiresBundle)
     }
 
-    func testOutsideBundleWithHelpRunsCLIRegardlessOfBundleInstalled() {
-        XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--help"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+    // MARK: 診断
+
+    func testDoctorIsDiagnostic() {
+        XCTAssertEqual(classify(["doctor"]), .diagnostic)
     }
 
-    func testOutsideBundleWithVersionRunsCLIRegardlessOfBundleInstalled() {
+    func testDoctorWithJSONIsDiagnostic() {
+        XCTAssertEqual(classify(["doctor", "--json"]), .diagnostic)
+    }
+
+    // MARK: 通知APIに依存しない種別
+
+    func testInstallIsBundleFree() {
+        XCTAssertEqual(classify(["install"]), .bundleFree)
+    }
+
+    func testUninstallIsBundleFree() {
+        XCTAssertEqual(classify(["uninstall", "--profile", "codex"]), .bundleFree)
+    }
+
+    func testListIsBundleFree() {
+        XCTAssertEqual(classify(["list", "--json"]), .bundleFree)
+    }
+
+    func testPsIsBundleFree() {
+        XCTAssertEqual(classify(["ps"]), .bundleFree)
+    }
+
+    /// 補完はバンドル未インストールでも取得できなければならない (Requirement 8.4)。
+    func testCompletionIsBundleFree() {
+        XCTAssertEqual(classify(["completion", "zsh"]), .bundleFree)
+    }
+
+    /// ヘルプは throw せずヘルプ用コマンドとして解決される (2026-07-30 実測)。
+    /// 分類は throw の有無ではなく返ってきた型で行うため、これも bundleFree に落ちる。
+    func testHelpIsBundleFree() {
+        XCTAssertEqual(classify(["--help"]), .bundleFree)
+        XCTAssertEqual(classify(["-h"]), .bundleFree)
+    }
+
+    func testVersionIsBundleFree() {
+        XCTAssertEqual(classify(["--version"]), .bundleFree)
+    }
+
+    /// 従来の補完スクリプト生成オプションも引き継ぎ不要で完了する (Requirement 8.6)。
+    func testLegacyCompletionScriptOptionIsBundleFree() {
+        XCTAssertEqual(classify(["--generate-completion-script", "zsh"]), .bundleFree)
+    }
+
+    /// 解釈できない引数はバンドルへ引き継がず、その場でエラーを出させる (Requirement 11.5)。
+    func testUnparsableArgumentsAreBundleFree() {
+        XCTAssertEqual(classify(["bogus"]), .bundleFree)
+        XCTAssertEqual(classify(["--title", "only"]), .bundleFree)
+        XCTAssertEqual(classify(["completion", "powershell"]), .bundleFree)
+    }
+
+    // MARK: オプション値がサブコマンド名と一致する場合 (Requirement 11.2 / 既存不具合の回帰)
+
+    /// 位置走査では `--title install` の "install" をサブコマンド名と誤認し、バンドル外で
+    /// 通知APIに到達してクラッシュしていた。解決結果の型で判定すればこの誤認は起きない。
+    func testOptionValueMatchingASubcommandNameIsNotTreatedAsThatSubcommand() {
+        XCTAssertEqual(classify(["--title", "install", "--message", "m"]), .requiresBundle)
+        XCTAssertEqual(classify(["--title", "ps", "--message", "m"]), .requiresBundle)
+        XCTAssertEqual(classify(["--title", "t", "--message", "list"]), .requiresBundle)
+        XCTAssertEqual(classify(["--subtitle", "uninstall", "--title", "t", "--message", "m"]), .requiresBundle)
+    }
+
+    // MARK: 解決処理の注入
+
+    func testInjectedParseResultDrivesTheClassification() {
         XCTAssertEqual(
-            LaunchGate.decide(
-                arguments: ["/path/to/yobirin", "--version"], isOutsideBundle: true,
-                isDefaultBundleInstalled: true),
-            .runCLI)
+            LaunchGate.classify(arguments: [], parse: { _ in DoctorCommand() }), .diagnostic)
+        XCTAssertEqual(
+            LaunchGate.classify(arguments: [], parse: { _ in ListCommand() }), .bundleFree)
+    }
+
+    private struct ParseFailure: Error {}
+
+    func testInjectedParseFailureIsBundleFree() {
+        XCTAssertEqual(
+            LaunchGate.classify(arguments: [], parse: { _ in throw ParseFailure() }), .bundleFree)
     }
 }
