@@ -1,0 +1,22 @@
+{
+  "feature_name": "cli-arguments-ux",
+  "created_at": "2026-07-29T20:11:43+09:00",
+  "updated_at": "2026-07-30T07:08:45+09:00",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
