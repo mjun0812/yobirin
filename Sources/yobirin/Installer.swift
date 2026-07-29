@@ -65,6 +65,16 @@ enum Installer {
     /// PATH上のsymlink先ディレクトリを指定する環境変数名 (旧 `scripts/install.sh` を踏襲)。
     static let binDirectoryEnvironmentKey = "YOBIRIN_BIN_DIR"
 
+    /// PATH上のsymlinkを置くディレクトリの解決 (install / uninstall / doctor が共有する単一ソース)。
+    /// 明示指定 > 環境変数 > `<home>/.local/bin` の順に決まる。
+    static func resolvedBinDirectory(
+        binDirectory: String? = nil,
+        homeDirectory: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        binDirectory ?? environment[binDirectoryEnvironmentKey] ?? "\(homeDirectory)/.local/bin"
+    }
+
     /// 新規インストール直後に出す確認用通知の内容 (Requirement 20.1)。
     ///
     /// 正のタイムアウトを必ず付ける。応答がなければ既存のタイムアウト処理 (Requirement 5.2) が
@@ -113,10 +123,8 @@ enum Installer {
         launchDetached: DetachedProcessLauncher = Self.defaultLaunchDetached
     ) throws -> InstallOutcome {
         let naming = try ProfileNaming.resolve(profile: profile, homeDirectory: homeDirectory)
-        let resolvedBinDirectory =
-            binDirectory
-            ?? ProcessInfo.processInfo.environment[binDirectoryEnvironmentKey]
-            ?? "\(homeDirectory)/.local/bin"
+        let resolvedBinDirectory = Self.resolvedBinDirectory(
+            binDirectory: binDirectory, homeDirectory: homeDirectory)
 
         // 1. 一時ディレクトリへContents/{MacOS,Resources}を組み立てる。実行ファイルは実行中の
         //    自分自身 (symlink経由起動でも実体へ解決したパス) をコピーする。
@@ -278,10 +286,8 @@ enum Installer {
         let unregisterExitCode = runProcess(lsregisterPath, ["-u", naming.bundlePath])
         try fileManager.removeItem(atPath: naming.bundlePath)
 
-        let resolvedBinDirectory =
-            binDirectory
-            ?? ProcessInfo.processInfo.environment[binDirectoryEnvironmentKey]
-            ?? "\(homeDirectory)/.local/bin"
+        let resolvedBinDirectory = Self.resolvedBinDirectory(
+            binDirectory: binDirectory, homeDirectory: homeDirectory)
         let linkPath = "\(resolvedBinDirectory)/\(ProfileNaming.executableName)"
         // `fileExists(atPath:)` はsymlinkを辿るため、削除直後の壊れたsymlinkを「存在しない」と
         // 誤判定する。symlink自体の有無は `attributesOfItem` (lstat相当) で見る (installと同じ作法)。
