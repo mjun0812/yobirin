@@ -50,6 +50,9 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
     func getDeliveredNotifications(completionHandler: @escaping ([UNNotification]) -> Void) {
         completionHandler([])
     }
+
+    /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {}
 }
 
 /// `Scheduler` のモック。手動発火のため実際には発火せず、呼び出しだけを記録する

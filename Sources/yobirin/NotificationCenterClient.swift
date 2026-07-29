@@ -12,6 +12,14 @@ protocol NotificationCenterClient {
     func removeDeliveredNotifications(withIdentifiers identifiers: [String])
     func add(_ request: UNNotificationRequest, completionHandler: (@Sendable (Error?) -> Void)?)
     func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void)
+
+    /// 通知許可の状態を**読み取る**だけの窓口 (Requirement 15.4)。
+    ///
+    /// `doctor` はこれのみを使う。`requestAuthorization` を診断に使ってはならない — 呼ぶと
+    /// 診断のたびに許可を要求することになり、未許可の初回は許可ダイアログが出る
+    /// (design.md DoctorCommand)。`UNNotificationSettings` 全体ではなく
+    /// `UNAuthorizationStatus` だけを渡すのは、値型 (Sendable) のまま境界を越えられるため。
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void)
 }
 
 /// 実センターへの薄い橋渡し。`center` は算出プロパティとして遅延評価するため、型の参照や
@@ -41,5 +49,11 @@ final class UNNotificationCenterAdapter: NotificationCenterClient {
 
     func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
         center.getDeliveredNotifications(completionHandler: completionHandler)
+    }
+
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {
+        center.getNotificationSettings { settings in
+            completionHandler(settings.authorizationStatus)
+        }
     }
 }

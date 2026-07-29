@@ -37,6 +37,9 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     func getDeliveredNotifications(completionHandler: @escaping ([UNNotification]) -> Void) {
         completionHandler([])
     }
+
+    /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {}
 }
 
 final class NotificationSessionTests: XCTestCase {
