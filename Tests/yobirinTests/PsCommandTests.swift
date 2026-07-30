@@ -486,3 +486,180 @@ final class PsCommandTests: XCTestCase {
         XCTAssertEqual(entry["path"] as? String, defaultMachOPath)
     }
 }
+
+// MARK: - 短縮形と単位付きタイムアウトへの追随 (Requirements 14.1〜14.6)
+
+final class PsCommandShortFlagTests: XCTestCase {
+    private let homeDirectory = "/Users/fake"
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private var machOPath: String {
+        ProfileNaming.default(homeDirectory: homeDirectory).machOPath
+    }
+
+    private struct Captured {
+        var stdout: [String] = []
+        var exitCodes: [Int32] = []
+    }
+
+    @discardableResult
+    private func run(
+        json: Bool,
+        profileFilter: String? = nil,
+        argv: [String]?
+    ) -> Captured {
+        var captured = Captured()
+        PsCommand.perform(
+            json: json,
+            profileFilter: profileFilter,
+            currentPID: 999,
+            now: now,
+            homeDirectory: homeDirectory,
+            scan: {
+                [
+                    PsCommand.RawProcessRecord(
+                        pid: 42, path: self.machOPath, argv: argv,
+                        startTime: self.now.addingTimeInterval(-30))
+                ]
+            },
+            stdoutWriter: { captured.stdout.append($0) },
+            stderrWriter: { _ in },
+            exit: { captured.exitCodes.append($0) }
+        )
+        return captured
+    }
+
+    // MARK: 対象判定 (Requirement 14.1)
+
+    func testShortTitleFlagKeepsTheProcessInTheList() throws {
+        let output = run(json: false, argv: [machOPath, "-t", "Build", "-m", "body"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("42"), "短縮形のみのプロセスが一覧から漏れている:\n\(output)")
+    }
+
+    func testShortTitleEqualsFormAlsoCounts() throws {
+        let output = run(json: false, argv: [machOPath, "-t=Build", "-m", "body"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("42"), output)
+    }
+
+    // MARK: タイトル抽出 (Requirement 14.2)
+
+    func testExtractsTitleFromShortFlag() throws {
+        let output = run(json: false, argv: [machOPath, "-t", "Deploy", "-m", "m"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("Deploy"), output)
+    }
+
+    func testExtractsTitleFromShortEqualsForm() throws {
+        let output = run(json: true, argv: [machOPath, "-t=Deploy", "-m", "m"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("\"title\":\"Deploy\""), output)
+    }
+
+    // MARK: タイムアウトの解釈 (Requirements 14.3, 14.4)
+
+    func testUnitSuffixedTimeoutIsConvertedToSeconds() throws {
+        let output = run(json: true, argv: [machOPath, "--title", "t", "--timeout", "5m"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("\"timeoutSeconds\":300"), output)
+    }
+
+    func testBareTimeoutIsStillSeconds() throws {
+        let output = run(json: true, argv: [machOPath, "--title", "t", "--timeout", "300"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("\"timeoutSeconds\":300"), output)
+    }
+
+    func testUninterpretableTimeoutIsTreatedAsAbsent() throws {
+        let output = run(json: true, argv: [machOPath, "--title", "t", "--timeout", "bogus"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("\"timeoutSeconds\":null"), output)
+    }
+
+    // MARK: 表示形式 (Requirements 14.5, 14.6)
+
+    /// テキストのTIMEOUT列は経過時間と同じ人間可読形式 (`5m00s`)。JSONは秒数のまま。
+    func testTextTimeoutIsHumanReadable() throws {
+        let output = run(json: false, argv: [machOPath, "--title", "t", "--timeout", "300"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("5m00s"), output)
+        XCTAssertFalse(output.contains(" 300 "), output)
+    }
+
+    func testTextTimeoutUnderAMinuteShowsSeconds() throws {
+        let output = run(json: false, argv: [machOPath, "--title", "t", "--timeout", "45"]).stdout.first ?? ""
+        XCTAssertTrue(output.contains("45s"), output)
+    }
+}
+
+// MARK: - プロファイルによる絞り込み (Requirements 14.7, 14.8)
+
+final class PsCommandProfileFilterTests: XCTestCase {
+    private let homeDirectory = "/Users/fake"
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private struct Captured {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var exitCodes: [Int32] = []
+    }
+
+    /// 既定バンドル1つ + claude 1つ + codex 1つの3プロセスを注入する。
+    @discardableResult
+    private func run(json: Bool, profileFilter: String?) throws -> Captured {
+        let defaultPath = ProfileNaming.default(homeDirectory: homeDirectory).machOPath
+        let claudePath = try ProfileNaming.forProfile("claude", homeDirectory: homeDirectory).machOPath
+        let codexPath = try ProfileNaming.forProfile("codex", homeDirectory: homeDirectory).machOPath
+
+        var captured = Captured()
+        PsCommand.perform(
+            json: json,
+            profileFilter: profileFilter,
+            currentPID: 999,
+            now: now,
+            homeDirectory: homeDirectory,
+            scan: {
+                [
+                    PsCommand.RawProcessRecord(
+                        pid: 1, path: defaultPath, argv: [defaultPath, "--title", "D"],
+                        startTime: self.now.addingTimeInterval(-10)),
+                    PsCommand.RawProcessRecord(
+                        pid: 2, path: claudePath, argv: [claudePath, "--title", "C1"],
+                        startTime: self.now.addingTimeInterval(-20)),
+                    PsCommand.RawProcessRecord(
+                        pid: 3, path: codexPath, argv: [codexPath, "--title", "X"],
+                        startTime: self.now.addingTimeInterval(-30)),
+                ]
+            },
+            stdoutWriter: { captured.stdout.append($0) },
+            stderrWriter: { captured.stderr.append($0) },
+            exit: { captured.exitCodes.append($0) }
+        )
+        return captured
+    }
+
+    func testFilterKeepsOnlyTheMatchingProfile() throws {
+        let output = try run(json: false, profileFilter: "claude").stdout.first ?? ""
+        XCTAssertTrue(output.contains("C1"), output)
+        XCTAssertFalse(output.contains("X"), output)
+    }
+
+    /// 絞り込み指定時は既定バンドルのプロセスを対象から外す (design.md PsCommand)。
+    func testFilterExcludesTheDefaultBundle() throws {
+        let output = try run(json: false, profileFilter: "claude").stdout.first ?? ""
+        XCTAssertFalse(output.contains("(default)"), output)
+    }
+
+    func testNoFilterKeepsEverything() throws {
+        let output = try run(json: false, profileFilter: nil).stdout.first ?? ""
+        for title in ["D", "C1", "X"] {
+            XCTAssertTrue(output.contains(title), output)
+        }
+    }
+
+    /// 命名規約を満たさない名前は、一覧を出さずにエラー終了する (Requirement 14.8)。
+    func testInvalidFilterNameFailsWithoutListing() throws {
+        let captured = try run(json: false, profileFilter: "My-App")
+        XCTAssertTrue(captured.stdout.isEmpty, "\(captured.stdout)")
+        XCTAssertFalse(captured.stderr.isEmpty)
+        XCTAssertEqual(captured.exitCodes, [ResultEmitter.environmentErrorExitCode])
+    }
+
+    func testFilterWithNoMatchesShowsTheEmptyGuidance() throws {
+        let output = try run(json: false, profileFilter: "ghost").stdout.first ?? ""
+        XCTAssertTrue(output.contains("No processes"), output)
+    }
+}

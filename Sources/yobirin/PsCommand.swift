@@ -17,9 +17,13 @@ struct PsCommand: ParsableCommand {
     @Flag(help: "Print the list as machine-readable JSON to stdout")
     var json = false
 
+    @Option(help: "List only processes of this profile (excludes the default bundle)")
+    var profile: String?
+
     func run() {
         Self.perform(
             json: json,
+            profileFilter: profile,
             currentPID: getpid(),
             now: Date(),
             homeDirectory: ProfileNaming.resolvedHomeDirectory(),
@@ -57,6 +61,7 @@ struct PsCommand: ParsableCommand {
     /// テストする (ListCommandと同じ方針)。
     static func perform(
         json: Bool,
+        profileFilter: String? = nil,
         currentPID: Int32,
         now: Date,
         homeDirectory: String,
@@ -65,6 +70,18 @@ struct PsCommand: ParsableCommand {
         stderrWriter: (String) -> Void,
         exit: (Int32) -> Void
     ) {
+        // 絞り込み名の検証は走査より前に行う (Requirement 14.8: 一覧を出さずにエラー終了)。
+        if let profileFilter {
+            do {
+                try ProfileNaming.validate(profileFilter)
+            } catch {
+                stderrWriter(
+                    "Invalid profile name: \"\(profileFilter)\" (only lowercase letters and digits are allowed)")
+                exit(ResultEmitter.environmentErrorExitCode)
+                return
+            }
+        }
+
         let records: [RawProcessRecord]
         do {
             records = try scan()
@@ -74,8 +91,13 @@ struct PsCommand: ParsableCommand {
             return
         }
 
-        let entries = waitingEntries(
+        var entries = waitingEntries(
             from: records, currentPID: currentPID, now: now, homeDirectory: homeDirectory)
+        if let profileFilter {
+            // 既定バンドル (profile == nil) は「どのプロファイルでもない」ため絞り込みで外れる
+            // (Requirement 14.7)。
+            entries = entries.filter { $0.profile == profileFilter }
+        }
 
         stdoutWriter(json ? jsonString(for: entries) : textString(for: entries))
     }
@@ -113,11 +135,18 @@ struct PsCommand: ParsableCommand {
         return sorted.map { candidate in
             let argv = candidate.record.argv
             let elapsed = max(0, Int(now.timeIntervalSince(candidate.record.startTime)))
+            // タイムアウトの解釈は notify と同一の変換規則 (TimeoutDuration) を使う
+            // (Requirements 14.3, 14.4)。解釈できない値は欠損として扱う。
+            let timeoutSeconds = argv.flatMap { extractOption("--timeout", from: $0) }
+                .flatMap { TimeoutDuration.seconds(from: $0) }
+                .map { Int($0) }
             return Entry(
                 pid: candidate.record.pid,
                 profile: candidate.profile,
-                title: argv.flatMap { extractOption("--title", from: $0) },
-                timeoutSeconds: argv.flatMap { extractOption("--timeout", from: $0) }.flatMap { Int($0) },
+                title: argv.flatMap { arguments in
+                    titleOptionNames.lazy.compactMap { extractOption($0, from: arguments) }.first
+                },
+                timeoutSeconds: timeoutSeconds,
                 elapsedSeconds: elapsed,
                 path: candidate.record.path
             )
@@ -160,11 +189,18 @@ struct PsCommand: ParsableCommand {
         }
     }
 
-    /// argvに `--title`/`--title=` が含まれるか (design.md「argvに`--title`/`--title=`を含む」)。
-    /// notify系の必須オプションであり、`install`/`list`/`ps`/掃除 (引数なし) は持たない。
+    /// argvにタイトル指定が含まれるか。notify系の必須オプションであり、`install`/`list`/`ps`/
+    /// 掃除 (引数なし) は持たない。長短両形式を見る (Requirement 14.1) — 短縮形 `-t` のみで
+    /// 起動されたプロセスを一覧から漏らさないため。
     private static func argvContainsTitleFlag(_ argv: [String]) -> Bool {
-        argv.contains { $0 == "--title" || $0.hasPrefix("--title=") }
+        argv.contains { argument in
+            titleOptionNames.contains(argument)
+                || titleOptionNames.contains { argument.hasPrefix($0 + "=") }
+        }
     }
+
+    /// タイトル指定の表記 (NotifyCommand の宣言と対応)。
+    private static let titleOptionNames = ["--title", "-t"]
 
     /// argvから `name` オプションの値を抽出する (`--title x` / `--title=x` 両形式、design.md
     /// 「タイムアウト指定 (`--title x` / `--title=x` 両形式の抽出)」)。
@@ -201,7 +237,9 @@ struct PsCommand: ParsableCommand {
                 pid: String(entry.pid),
                 profile: entry.profile ?? "(default)",
                 title: entry.title ?? "-",
-                timeout: entry.timeoutSeconds.map(String.init) ?? "-",
+                // テキスト表示は経過時間と同じ人間可読形式 (Requirement 14.5)。JSONは秒数のまま
+                // (14.6) なので、機械可読が必要な利用者は --json を使う。
+                timeout: entry.timeoutSeconds.map(formatElapsed) ?? "-",
                 elapsed: formatElapsed(entry.elapsedSeconds)
             )
         }
