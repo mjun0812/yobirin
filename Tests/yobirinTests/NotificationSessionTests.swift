@@ -18,6 +18,19 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     /// (task 2.1。既定は空配列で、従来どおりの挙動を保つ)。
     var deliveredIdentifiersToReturn: [String] = []
 
+    /// true のとき `getDeliveredNotificationIdentifiers` のcompletionHandlerをすぐに呼ばず
+    /// `pendingCompletionHandler` に保持する。group置換走査の途中でキャンセルが確定する
+    /// レースを再現するため (task 2.2, Requirement 2.5 非同期ガード)。
+    var deferCompletionHandler = false
+    private var pendingCompletionHandler: (([String]) -> Void)?
+
+    /// 保留していたcompletionHandlerを手動で発火する。
+    func firePendingCompletionHandler() {
+        let handler = pendingCompletionHandler
+        pendingCompletionHandler = nil
+        handler?(deliveredIdentifiersToReturn)
+    }
+
     func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
         completionHandler(true, nil)
     }
@@ -39,7 +52,11 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     }
 
     func getDeliveredNotificationIdentifiers(completionHandler: @escaping ([String]) -> Void) {
-        completionHandler(deliveredIdentifiersToReturn)
+        if deferCompletionHandler {
+            pendingCompletionHandler = completionHandler
+        } else {
+            completionHandler(deliveredIdentifiersToReturn)
+        }
     }
 
     /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
@@ -427,6 +444,94 @@ final class NotificationSessionTests: XCTestCase {
             client.removeDeliveredCalls.flatMap { $0 }.contains(identifierB),
             "セッションAのtimeoutがセッションBの識別名を削除してはならない"
         )
+    }
+
+    // MARK: - Cancellation (Requirements 2.1, 2.4, 2.5, 1.1)
+
+    /// SIGTERMによるキャンセル入力。自分の識別名を削除してから `.canceled` で確定する
+    /// (design.md System Flows「SIGTERMキャンセル」、既存のtimeoutテストと同じパターン)。
+    func testHandleCancelRemovesDeliveredNotificationBeforeEmittingResult() throws {
+        let client = MockNotificationCenterClient()
+        var removalCountAtEmitTime = -1
+        var results: [NotificationResult] = []
+        let session = NotificationSession(
+            client: client,
+            actions: [],
+            onResult: { result in
+                removalCountAtEmitTime = client.removeDeliveredCalls.count
+                results.append(result)
+            }
+        )
+        let request = makeRequest()
+        try session.deliver(request)
+        let deliveredIdentifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+
+        session.handleCancel()
+
+        XCTAssertEqual(removalCountAtEmitTime, 1)
+        XCTAssertEqual(client.removeDeliveredCalls, [[deliveredIdentifier]])
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// 応答で確定済みの場合、後から来る `handleCancel` は既存の一度きり確定機構により無視される
+    /// (Requirement 2.4: 先着が勝つ)。
+    func testHandleCancelAfterResponseIsIgnored() throws {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+        let request = makeRequest()
+        try session.deliver(request)
+
+        session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
+        session.handleCancel()
+
+        XCTAssertEqual(results, [.clicked])
+        XCTAssertTrue(client.removeDeliveredCalls.isEmpty, "clicked確定は通知を削除しないため、後続のcancelでも削除は増えない")
+    }
+
+    /// 配信前にキャンセルが確定した場合、`deliver` の同期部分冒頭のガードにより
+    /// category登録・addのいずれも行われない (Requirement 2.5、research.md DD-4)。
+    func testDeliverAfterCancelDoesNotAddNotification() throws {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+
+        session.handleCancel()
+        try session.deliver(makeRequest())
+
+        XCTAssertTrue(client.addedRequests.isEmpty)
+        XCTAssertTrue(client.setCategoriesCalls.isEmpty)
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// group置換走査 (非同期completion) の途中でキャンセルが確定した場合、completion内の
+    /// `add` 直前のガードにより配信が握り潰される (Requirement 2.5、research.md DD-4)。
+    /// これを怠るとレースで孤児通知が出る。
+    func testCancelDuringGroupReplacementScanPreventsAdd() throws {
+        let client = MockNotificationCenterClient()
+        client.deferCompletionHandler = true
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+        let request = makeRequest(group: "build")
+
+        try session.deliver(request)
+        session.handleCancel()
+        client.firePendingCompletionHandler()
+
+        XCTAssertTrue(client.addedRequests.isEmpty, "走査完了時点で確定済みならaddを握り潰す")
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// 未配信 (`deliver` 未呼び出し) のキャンセルは、削除なしで `.canceled` として確定する。
+    func testHandleCancelWithoutPriorDeliverCommitsWithoutRemoval() {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+
+        session.handleCancel()
+
+        XCTAssertTrue(client.removeDeliveredCalls.isEmpty)
+        XCTAssertEqual(results, [.canceled])
     }
 
     func testConcurrentResponsesCommitExactlyOnce() {

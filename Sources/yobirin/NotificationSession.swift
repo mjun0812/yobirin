@@ -81,6 +81,11 @@ final class NotificationSession: @unchecked Sendable {
     /// 識別名以外を削除することはない (yobirin-cli Requirement 5.2の「自分が配信した通知を削除」
     /// への追随)。
     func deliver(_ request: NotificationRequest, completionHandler: (@Sendable (Error?) -> Void)? = nil) throws {
+        // 結果確定済みなら何も配信しない (Requirement 2.5、design.md DD-4)。配信前キャンセル後に
+        // 認可コールバックが届いても通知が出ないよう、category登録・identifier採番より前に
+        // ガードする (deliveredIdentifierをキャンセル済みなのに上書きしないため)。
+        guard !committedLock.withLock({ $0 }) else { return }
+
         let content = try Self.makeContent(from: request)
         content.categoryIdentifier = NotificationSessionIdentifiers.categoryIdentifier
 
@@ -110,6 +115,9 @@ final class NotificationSession: @unchecked Sendable {
         client.getDeliveredNotificationIdentifiers { identifiers in
             let ownGroupIdentifiers = identifiers.filter { $0.hasPrefix(prefix) }
             self.client.removeDeliveredNotifications(withIdentifiers: ownGroupIdentifiers)
+            // 走査中にキャンセルが確定した場合、addを握り潰す (Requirement 2.5、design.md DD-4)。
+            // ここを怠るとレースで孤児通知 (誰も後始末しない通知) が出る。
+            guard !self.committedLock.withLock({ $0 }) else { return }
             self.client.add(notificationRequest, completionHandler: completionHandler)
         }
     }
@@ -146,11 +154,18 @@ final class NotificationSession: @unchecked Sendable {
         commit(.timeout)
     }
 
+    /// SIGTERMによるキャンセル確定への入力 (`handleTimeout` と対になる、design.md System Flows
+    /// 「SIGTERMキャンセル」)。
+    func handleCancel() {
+        commit(.canceled)
+    }
+
     /// 一度きりの結果確定 (Requirement 3.8)。先着1件のみが `onResult` を呼び、以降は無視される。
     ///
-    /// `result` がtimeoutの場合のみ、配信済み通知を削除してから `onResult` を呼ぶ
-    /// (Requirement 5.2: exit後にクリックされ得る通知を残さない)。応答確定時 (clicked等) は
-    /// 通知を削除せずそのまま出力を決定する (design.md System Flows)。
+    /// `result` がtimeoutまたはcanceledの場合のみ、配信済み通知を削除してから `onResult` を呼ぶ
+    /// (Requirement 5.2, 2.1: exit後にクリックされ得る通知を残さない。キャンセルもタイムアウトと
+    /// 同じ理由で自分の通知を後始末する)。応答確定時 (clicked等) は通知を削除せずそのまま出力を
+    /// 決定する (design.md System Flows)。
     private func commit(_ result: NotificationResult) {
         let shouldEmit = committedLock.withLock { alreadyCommitted -> Bool in
             if alreadyCommitted { return false }
@@ -158,8 +173,13 @@ final class NotificationSession: @unchecked Sendable {
             return true
         }
         guard shouldEmit else { return }
-        if case .timeout = result, let identifier = deliveredIdentifier {
-            client.removeDeliveredNotifications(withIdentifiers: [identifier])
+        switch result {
+        case .timeout, .canceled:
+            if let identifier = deliveredIdentifier {
+                client.removeDeliveredNotifications(withIdentifiers: [identifier])
+            }
+        default:
+            break
         }
         onResult(result)
     }
