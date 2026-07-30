@@ -23,6 +23,26 @@ enum NotificationSessionIdentifiers {
     }
 }
 
+/// 通知identifierの生成とgroup置換の走査規則の単一ソース (design.md NotificationIdentity)。
+///
+/// identifierの組み立てはこのenum以外で行わない。一致の正確さを担保しているのは `#` 終端であり、
+/// Base64のアルファベット (`A-Za-z0-9+/=`) が `#` を含まないことから、走査接頭辞
+/// `base64(group) + "#"` が別groupの識別名に一致することは構造的に起こり得ない
+/// (research.md DD-1。`base64("abc")` が `base64("abcd")` の接頭辞になる場合でも、
+/// `#` 終端により識別名としては一致しない)。
+enum NotificationIdentity {
+    /// group あり: base64(utf8(group)) + "#" + UUID / group なし: UUID
+    static func makeIdentifier(group: String?) -> String {
+        guard let group else { return UUID().uuidString }
+        return replacementPrefix(group: group) + UUID().uuidString
+    }
+
+    /// group 置換の走査接頭辞: base64(utf8(group)) + "#"
+    static func replacementPrefix(group: String) -> String {
+        Data(group.utf8).base64EncodedString() + "#"
+    }
+}
+
 /// 通知の配信と応答捕捉 (design.md Components and Interfaces > NotificationSession)。
 ///
 /// 結果は「未確定 → 確定 (clicked / dismissed / action / replied / timeout)」の一方向遷移であり、

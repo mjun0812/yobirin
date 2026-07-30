@@ -401,3 +401,72 @@ final class NotificationSessionTests: XCTestCase {
         XCTAssertEqual(callCount, 1)
     }
 }
+
+/// `NotificationIdentity` の不変条件テスト (design.md NotificationIdentity, research.md DD-1)。
+final class NotificationIdentityTests: XCTestCase {
+    /// 符号化結果が接頭辞関係になる組を含む、先頭部分が重なる group の組。
+    private static let overlappingGroupPairs: [(String, String)] = [
+        ("a", "ab"),
+        ("a", "a#b"),
+        ("abc", "abcd"),
+    ]
+
+    // MARK: - makeIdentifier(group:) は常に自 group の replacementPrefix を接頭辞に持つ (Requirement 1.4, 1.5)
+
+    func testMakeIdentifierWithGroupHasOwnReplacementPrefix() {
+        for group in ["build", "a", "ab", "a#b", "abc", "abcd", "日本語", "#"] {
+            let identifier = NotificationIdentity.makeIdentifier(group: group)
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertTrue(identifier.hasPrefix(prefix), "group: \(group)")
+        }
+    }
+
+    func testMakeIdentifierWithoutGroupIsUUIDAlone() {
+        let identifier = NotificationIdentity.makeIdentifier(group: nil)
+        XCTAssertNotNil(UUID(uuidString: identifier))
+    }
+
+    // MARK: - 先頭部分が重なる別 group の接頭辞は互いに一致しない (Requirement 1.4)
+
+    func testReplacementPrefixesOfOverlappingGroupsDoNotMatchEachOther() {
+        for (lhs, rhs) in Self.overlappingGroupPairs {
+            let lhsPrefix = NotificationIdentity.replacementPrefix(group: lhs)
+            let rhsPrefix = NotificationIdentity.replacementPrefix(group: rhs)
+            XCTAssertFalse(lhsPrefix.hasPrefix(rhsPrefix), "\(lhs) prefix vs \(rhs) prefix")
+            XCTAssertFalse(rhsPrefix.hasPrefix(lhsPrefix), "\(rhs) prefix vs \(lhs) prefix")
+        }
+    }
+
+    func testReplacementPrefixDoesNotMatchOtherOverlappingGroupIdentifier() {
+        for (lhs, rhs) in Self.overlappingGroupPairs {
+            let lhsPrefix = NotificationIdentity.replacementPrefix(group: lhs)
+            let rhsIdentifier = NotificationIdentity.makeIdentifier(group: rhs)
+            XCTAssertFalse(rhsIdentifier.hasPrefix(lhsPrefix), "\(lhs) prefix vs \(rhs) identifier")
+
+            let rhsPrefix = NotificationIdentity.replacementPrefix(group: rhs)
+            let lhsIdentifier = NotificationIdentity.makeIdentifier(group: lhs)
+            XCTAssertFalse(lhsIdentifier.hasPrefix(rhsPrefix), "\(rhs) prefix vs \(lhs) identifier")
+        }
+    }
+
+    // MARK: - group なしの識別名はいかなる replacementPrefix にも一致しない (Requirement 1.5)
+
+    func testIdentifierWithoutGroupDoesNotMatchAnyReplacementPrefix() {
+        let identifier = NotificationIdentity.makeIdentifier(group: nil)
+        for group in ["build", "a", "ab", "a#b", "abc", "abcd", "日本語", "#"] {
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertFalse(identifier.hasPrefix(prefix), "group: \(group)")
+        }
+    }
+
+    // MARK: - `#` や非ASCIIを含む group の往復 (research.md DD-1)
+
+    func testMakeIdentifierRoundTripsForHashAndNonASCIIGroups() {
+        for group in ["a#b", "#", "日本語"] {
+            let identifier = NotificationIdentity.makeIdentifier(group: group)
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertTrue(identifier.hasPrefix(prefix), "group: \(group)")
+            XCTAssertFalse(identifier.dropFirst(prefix.count).isEmpty, "group: \(group)")
+        }
+    }
+}
