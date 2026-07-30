@@ -47,7 +47,7 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
         completionHandler?(nil)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping ([UNNotification]) -> Void) {
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping ([String]) -> Void) {
         completionHandler([])
     }
 

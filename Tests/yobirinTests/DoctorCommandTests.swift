@@ -311,7 +311,7 @@ private final class StubPermissionClient: NotificationCenterClient, @unchecked S
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>) {}
     func removeDeliveredNotifications(withIdentifiers identifiers: [String]) {}
     func add(_ request: UNNotificationRequest, completionHandler: ((Error?) -> Void)?) {}
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {}
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {}
 
     func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {
         getAuthorizationStatusCallCount += 1

@@ -11,7 +11,7 @@ protocol NotificationCenterClient {
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>)
     func removeDeliveredNotifications(withIdentifiers identifiers: [String])
     func add(_ request: UNNotificationRequest, completionHandler: (@Sendable (Error?) -> Void)?)
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void)
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void)
 
     /// 通知許可の状態を**読み取る**だけの窓口 (Requirement 15.4)。
     ///
@@ -47,8 +47,10 @@ final class UNNotificationCenterAdapter: NotificationCenterClient {
         center.add(request, withCompletionHandler: completionHandler)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
-        center.getDeliveredNotifications(completionHandler: completionHandler)
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {
+        center.getDeliveredNotifications { notifications in
+            completionHandler(notifications.map { $0.request.identifier })
+        }
     }
 
     func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {

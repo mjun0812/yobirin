@@ -96,7 +96,7 @@ private final class StubAuthorizationStatusClient: NotificationCenterClient, @un
 
     func add(_ request: UNNotificationRequest, completionHandler: ((Error?) -> Void)?) {}
 
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {}
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {}
 
     func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {
         let status = status
