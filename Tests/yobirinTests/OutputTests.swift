@@ -20,6 +20,11 @@ final class OutputTests: XCTestCase {
         XCTAssertEqual(output.jsonString(), "{\"result\":\"timeout\"}")
     }
 
+    func testCanceledJSON() throws {
+        let output = ResultOutput(result: .canceled, deliveredAt: nil)
+        XCTAssertEqual(output.jsonString(), "{\"result\":\"canceled\"}")
+    }
+
     func testActionJSON() throws {
         let output = ResultOutput(result: .action(label: "Open", index: 0), deliveredAt: nil)
         XCTAssertEqual(output.jsonString(), "{\"result\":\"action\",\"action\":\"Open\",\"actionIndex\":0}")
@@ -99,6 +104,7 @@ final class OutputTests: XCTestCase {
             (ResultOutput(result: .timeout, deliveredAt: nil), "timeout"),
             (ResultOutput(result: .action(label: "Open", index: 2), deliveredAt: nil), "action"),
             (ResultOutput(result: .replied(text: "hi"), deliveredAt: nil), "replied"),
+            (ResultOutput(result: .canceled, deliveredAt: nil), "canceled"),
         ]
 
         for (output, expectedResult) in cases {
@@ -175,6 +181,7 @@ final class ResultOutputValueTests: XCTestCase {
         XCTAssertEqual(value(.replied(text: "hi"), .result), "replied")
         XCTAssertEqual(value(.dismissed, .result), "dismissed")
         XCTAssertEqual(value(.timeout, .result), "timeout")
+        XCTAssertEqual(value(.canceled, .result), "canceled")
     }
 
     // MARK: action / actionIndex は action のみ
@@ -186,7 +193,7 @@ final class ResultOutputValueTests: XCTestCase {
     }
 
     func testActionFieldsAreAbsentOnOtherKinds() throws {
-        for result in [NotificationResult.clicked, .replied(text: "hi"), .dismissed, .timeout] {
+        for result in [NotificationResult.clicked, .replied(text: "hi"), .dismissed, .timeout, .canceled] {
             XCTAssertNil(value(result, .action), "\(result)")
             XCTAssertNil(value(result, .actionIndex), "\(result)")
         }
@@ -199,7 +206,9 @@ final class ResultOutputValueTests: XCTestCase {
     }
 
     func testTextFieldIsAbsentOnOtherKinds() throws {
-        for result in [NotificationResult.clicked, .action(label: "A", index: 0), .dismissed, .timeout] {
+        for result in [
+            NotificationResult.clicked, .action(label: "A", index: 0), .dismissed, .timeout, .canceled,
+        ] {
             XCTAssertNil(value(result, .text), "\(result)")
         }
     }
@@ -243,6 +252,11 @@ final class ResultExitCodeTests: XCTestCase {
         XCTAssertEqual(ResultEmitter.exitCode(for: .timeout), 4)
     }
 
+    /// canceled は5 (design.md 終了コード表、Requirement 3.2)。
+    func testCanceledExitsFive() throws {
+        XCTAssertEqual(ResultEmitter.exitCode(for: .canceled), 5)
+    }
+
     /// 既存の予約コード (未許可2 / 環境エラー1) と衝突しないこと (Requirements 1.6, 1.7)。
     /// アクションの index は category 登録時に採番される小さな値だが、上限は仕様に無いため
     /// 広い範囲で確かめる。
@@ -252,6 +266,7 @@ final class ResultExitCodeTests: XCTestCase {
             ResultEmitter.exitCode(for: .replied(text: "t")),
             ResultEmitter.exitCode(for: .dismissed),
             ResultEmitter.exitCode(for: .timeout),
+            ResultEmitter.exitCode(for: .canceled),
         ]
         for index in 0..<100 {
             codes.append(ResultEmitter.exitCode(for: .action(label: "L", index: index)))
@@ -260,10 +275,21 @@ final class ResultExitCodeTests: XCTestCase {
         XCTAssertFalse(codes.contains(ResultEmitter.environmentErrorExitCode))
     }
 
+    /// canceled が予約コード (1, 2) にも使用済みコード (3, 4, 10+) にも衝突しないこと
+    /// (Requirement 3.7)。
+    func testCanceledExitCodeDoesNotCollideWithReservedOrUsedCodes() throws {
+        XCTAssertNotEqual(ResultEmitter.canceledExitCode, ResultEmitter.permissionDeniedExitCode)
+        XCTAssertNotEqual(ResultEmitter.canceledExitCode, ResultEmitter.environmentErrorExitCode)
+        XCTAssertNotEqual(ResultEmitter.canceledExitCode, ResultEmitter.dismissedExitCode)
+        XCTAssertNotEqual(ResultEmitter.canceledExitCode, ResultEmitter.timeoutExitCode)
+        XCTAssertLessThan(ResultEmitter.canceledExitCode, ResultEmitter.actionExitCodeBase)
+    }
+
     /// 終了コードの数値は ResultEmitter の定数として一元管理する (structure.md)。
     func testCodesAreExposedAsNamedConstants() throws {
         XCTAssertEqual(ResultEmitter.dismissedExitCode, 3)
         XCTAssertEqual(ResultEmitter.timeoutExitCode, 4)
+        XCTAssertEqual(ResultEmitter.canceledExitCode, 5)
         XCTAssertEqual(ResultEmitter.actionExitCodeBase, 10)
     }
 }
@@ -286,6 +312,7 @@ final class ResultEmitterPolicyTests: XCTestCase {
     func testDefaultPolicyMatchesThePreviousBehaviorForEveryKind() throws {
         let results: [NotificationResult] = [
             .clicked, .action(label: "Open", index: 1), .replied(text: "hi"), .dismissed, .timeout,
+            .canceled,
         ]
         for result in results {
             let output = ResultOutput(result: result, deliveredAt: nil)
@@ -348,6 +375,36 @@ final class ResultEmitterPolicyTests: XCTestCase {
         let emitted = emit(.timeout, exitCode: true, print: .text)
         XCTAssertNil(emitted.text)
         XCTAssertEqual(emitted.exitCode, 4)
+    }
+
+    // MARK: canceled の出力方針 (Requirements 3.1〜3.5)
+
+    /// `--exit-code` 未指定時は既存どおり 0 (Requirement 3.3)。
+    func testCanceledDefaultPolicyOutputsJSONAndExitsZero() throws {
+        let output = ResultOutput(result: .canceled, deliveredAt: nil)
+        let emitted = ResultEmitter.forResult(output)
+        XCTAssertEqual(emitted.text, output.jsonString())
+        XCTAssertEqual(emitted.exitCode, 0)
+    }
+
+    /// `--exit-code` 指定時は 5 (Requirement 3.2)。
+    func testCanceledWithExitCodeEnabledExitsFive() throws {
+        XCTAssertEqual(emit(.canceled, exitCode: true).exitCode, 5)
+    }
+
+    /// `--print result` は `canceled` を生の文字列で返す (Requirement 3.4)。
+    func testCanceledPrintResultOutputsCanceled() throws {
+        XCTAssertEqual(emit(.canceled, print: .result).text, "canceled")
+    }
+
+    /// `--print action` / `actionIndex` / `text` は出力なし + 結果に対応する終了コード
+    /// (Requirement 3.5)。
+    func testCanceledPrintOtherFieldsProducesNoOutputButKeepsExitCode() throws {
+        for field: PrintField in [.action, .actionIndex, .text] {
+            let emitted = emit(.canceled, exitCode: true, print: field)
+            XCTAssertNil(emitted.text, "\(field)")
+            XCTAssertEqual(emitted.exitCode, 5, "\(field)")
+        }
     }
 
     // MARK: 出力方針は許可なし・環境エラーの経路に影響しない (Requirements 1.6, 1.7)

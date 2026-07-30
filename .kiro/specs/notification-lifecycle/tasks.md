@@ -14,7 +14,7 @@
   - _Requirements: 1.4, 1.5_
   - _Boundary: NotificationIdentity_
 
-- [ ] 1.2 (P) 結果種別 canceled の出力契約を追加する
+- [x] 1.2 (P) 結果種別 canceled の出力契約を追加する
   - 結果の列挙に `canceled` を追加し、JSON 表現を `{"result":"canceled"}` とする (種別固有フィールドなし)
   - 終了コードの対応に canceled → 5 を追加し、定数として既存の定数群と同じ場所に定義する
   - `--print result` の値は `canceled`、他フィールド (action / actionIndex / text) は値なしとする
