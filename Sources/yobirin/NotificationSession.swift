@@ -23,11 +23,37 @@ enum NotificationSessionIdentifiers {
     }
 }
 
+/// 通知identifierの生成とgroup置換の走査規則の単一ソース (design.md NotificationIdentity)。
+///
+/// identifierの組み立てはこのenum以外で行わない。一致の正確さを担保しているのは `#` 終端であり、
+/// Base64のアルファベット (`A-Za-z0-9+/=`) が `#` を含まないことから、走査接頭辞
+/// `base64(group) + "#"` が別groupの識別名に一致することは構造的に起こり得ない
+/// (research.md DD-1。`base64("abc")` が `base64("abcd")` の接頭辞になる場合でも、
+/// `#` 終端により識別名としては一致しない)。
+enum NotificationIdentity {
+    /// group あり: base64(utf8(group)) + "#" + UUID / group なし: UUID
+    static func makeIdentifier(group: String?) -> String {
+        guard let group else { return UUID().uuidString }
+        return replacementPrefix(group: group) + UUID().uuidString
+    }
+
+    /// group 置換の走査接頭辞: base64(utf8(group)) + "#"
+    static func replacementPrefix(group: String) -> String {
+        Data(group.utf8).base64EncodedString() + "#"
+    }
+}
+
 /// 通知の配信と応答捕捉 (design.md Components and Interfaces > NotificationSession)。
 ///
 /// 結果は「未確定 → 確定 (clicked / dismissed / action / replied / timeout)」の一方向遷移であり、
 /// `OSAllocatedUnfairLock` により一度きりの確定を保証する (design.md State Management)。
-final class NotificationSession {
+///
+/// `@unchecked Sendable`: `deliver` の group 置換走査が `getDeliveredNotificationIdentifiers` の
+/// `@Sendable` completionHandler内で `self` (client呼び出し) を捕捉する必要があるため
+/// (design.md Implementation Notes「置換走査の非同期化」)。排他は既存の `committedLock`
+/// (`OSAllocatedUnfairLock`) が担っており、この型自体を `Sendable` にしても新たな競合は増えない
+/// (`AppFlow` / `DeliveredNotificationSweep` と同じパターン)。
+final class NotificationSession: @unchecked Sendable {
     private let client: NotificationCenterClient
     private let actions: [String]
     private let onResult: (NotificationResult) -> Void
@@ -47,14 +73,24 @@ final class NotificationSession {
     }
 
     /// category登録・group置換・通知addを行う (Requirements 1.1-1.4, 2.1, 2.2, 4.1, 4.2, 4.4)。
+    ///
+    /// identifierの採番と`deliveredIdentifier`の設定は同期部分で完了させる (後続の`commit`が
+    /// 読むため)。group指定時のみ「配信済み一覧の取得 → 自groupの接頭辞に一致する識別名の抽出
+    /// → 削除 → add」の順で置換する (design.md System Flows「identifier規則とgroup置換」、
+    /// Requirement 1.1-1.5)。この置換走査により、同一groupの並行プロセスであっても自分が採番した
+    /// 識別名以外を削除することはない (yobirin-cli Requirement 5.2の「自分が配信した通知を削除」
+    /// への追随)。
     func deliver(_ request: NotificationRequest, completionHandler: (@Sendable (Error?) -> Void)? = nil) throws {
+        // 結果確定済みなら何も配信しない (Requirement 2.5、design.md DD-4)。配信前キャンセル後に
+        // 認可コールバックが届いても通知が出ないよう、category登録・identifier採番より前に
+        // ガードする (deliveredIdentifierをキャンセル済みなのに上書きしないため)。
+        guard !committedLock.withLock({ $0 }) else { return }
+
         let content = try Self.makeContent(from: request)
         content.categoryIdentifier = NotificationSessionIdentifiers.categoryIdentifier
 
-        let identifier = request.group ?? UUID().uuidString
-        if request.group != nil {
-            client.removeDeliveredNotifications(withIdentifiers: [identifier])
-        }
+        let identifier = NotificationIdentity.makeIdentifier(group: request.group)
+        deliveredIdentifier = identifier
 
         client.setNotificationCategories([
             Self.makeCategory(
@@ -64,9 +100,26 @@ final class NotificationSession {
             )
         ])
 
-        let notificationRequest = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        deliveredIdentifier = identifier
-        client.add(notificationRequest, completionHandler: completionHandler)
+        // `UNNotificationRequest` は `Sendable` に準拠しないため、group置換走査の
+        // completionHandler (`@Sendable`) を跨いで捕捉するには明示的な `unsafe` 注釈が要る。
+        // 生成後は不変であり、完了ハンドラは1回しか呼ばれないため実質的に安全 (research.md D3)。
+        nonisolated(unsafe) let notificationRequest = UNNotificationRequest(
+            identifier: identifier, content: content, trigger: nil)
+
+        guard let group = request.group else {
+            client.add(notificationRequest, completionHandler: completionHandler)
+            return
+        }
+
+        let prefix = NotificationIdentity.replacementPrefix(group: group)
+        client.getDeliveredNotificationIdentifiers { identifiers in
+            let ownGroupIdentifiers = identifiers.filter { $0.hasPrefix(prefix) }
+            self.client.removeDeliveredNotifications(withIdentifiers: ownGroupIdentifiers)
+            // 走査中にキャンセルが確定した場合、addを握り潰す (Requirement 2.5、design.md DD-4)。
+            // ここを怠るとレースで孤児通知 (誰も後始末しない通知) が出る。
+            guard !self.committedLock.withLock({ $0 }) else { return }
+            self.client.add(notificationRequest, completionHandler: completionHandler)
+        }
     }
 
     /// delegateコールバックからUN型を含まない入力として呼ばれる (design.md 抽象化の境界)。
@@ -101,11 +154,18 @@ final class NotificationSession {
         commit(.timeout)
     }
 
+    /// SIGTERMによるキャンセル確定への入力 (`handleTimeout` と対になる、design.md System Flows
+    /// 「SIGTERMキャンセル」)。
+    func handleCancel() {
+        commit(.canceled)
+    }
+
     /// 一度きりの結果確定 (Requirement 3.8)。先着1件のみが `onResult` を呼び、以降は無視される。
     ///
-    /// `result` がtimeoutの場合のみ、配信済み通知を削除してから `onResult` を呼ぶ
-    /// (Requirement 5.2: exit後にクリックされ得る通知を残さない)。応答確定時 (clicked等) は
-    /// 通知を削除せずそのまま出力を決定する (design.md System Flows)。
+    /// `result` がtimeoutまたはcanceledの場合のみ、配信済み通知を削除してから `onResult` を呼ぶ
+    /// (Requirement 5.2, 2.1: exit後にクリックされ得る通知を残さない。キャンセルもタイムアウトと
+    /// 同じ理由で自分の通知を後始末する)。応答確定時 (clicked等) は通知を削除せずそのまま出力を
+    /// 決定する (design.md System Flows)。
     private func commit(_ result: NotificationResult) {
         let shouldEmit = committedLock.withLock { alreadyCommitted -> Bool in
             if alreadyCommitted { return false }
@@ -113,8 +173,13 @@ final class NotificationSession {
             return true
         }
         guard shouldEmit else { return }
-        if case .timeout = result, let identifier = deliveredIdentifier {
-            client.removeDeliveredNotifications(withIdentifiers: [identifier])
+        switch result {
+        case .timeout, .canceled:
+            if let identifier = deliveredIdentifier {
+                client.removeDeliveredNotifications(withIdentifiers: [identifier])
+            }
+        default:
+            break
         }
         onResult(result)
     }

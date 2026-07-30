@@ -34,6 +34,7 @@ enum NotificationResult: Equatable {
     case replied(text: String)
     case dismissed
     case timeout
+    case canceled
 }
 
 /// 結果JSON全体。`result` 本体と、任意で付与できる `deliveredAt` を持つ。
@@ -49,7 +50,7 @@ struct ResultOutput: Equatable {
         var pairs: [(String, String)] = [("result", Self.jsonString(resultName))]
 
         switch result {
-        case .clicked, .dismissed, .timeout:
+        case .clicked, .dismissed, .timeout, .canceled:
             break
         case .action(let label, let index):
             pairs.append(("action", Self.jsonString(label)))
@@ -94,6 +95,7 @@ struct ResultOutput: Equatable {
         case .replied: return "replied"
         case .dismissed: return "dismissed"
         case .timeout: return "timeout"
+        case .canceled: return "canceled"
         }
     }
 
@@ -140,6 +142,9 @@ enum ResultEmitter {
     /// `--exit-code` 指定時のタイムアウト
     static let timeoutExitCode: Int32 = 4
 
+    /// `--exit-code` 指定時のキャンセル (SIGTERM による能動的な終了。design.md 終了コード表)
+    static let canceledExitCode: Int32 = 5
+
     /// `--exit-code` 指定時のアクション。`10 + actionIndex` を返すための基準値。
     /// 予約コード (1, 2) や却下・タイムアウト (3, 4) と間隔を空け、将来の結果種別の追加余地を残す。
     static let actionExitCodeBase: Int32 = 10
@@ -158,6 +163,8 @@ enum ResultEmitter {
             return dismissedExitCode
         case .timeout:
             return timeoutExitCode
+        case .canceled:
+            return canceledExitCode
         }
     }
 

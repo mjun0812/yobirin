@@ -164,9 +164,10 @@ yobirin -t <文字列> -m <文字列>         # --title / --message
 {"result":"replied","text":"入力されたテキスト"}
 {"result":"dismissed"}
 {"result":"timeout"}
+{"result":"canceled"}
 ```
 
-- `result`：`clicked`、`action`、`replied`、`dismissed`、`timeout` のいずれか
+- `result`：`clicked`、`action`、`replied`、`dismissed`、`timeout`、`canceled` のいずれか
 - `action` / `actionIndex`：押されたアクションボタンのラベルと0始まりのindex (同名ラベルはindexで区別できます)
 - `text`：返信欄に入力されたテキスト
 
@@ -187,11 +188,21 @@ yobirin -t <文字列> -m <文字列>         # --title / --message
 | clicked または replied | 0                |
 | dismissed              | 3                |
 | timeout                | 4                |
+| canceled               | 5                |
 | action                 | 10 + actionIndex |
 
 許可なし (2) と環境エラー (1) のコードは変わりません。
 
 タイムアウトした通知は、通知センターから削除してから終了するので、応答されないまま残ることはありません。強制終了などで通知だけが残った場合は、`yobirin sweep` で掃除できます (削除した件数を表示します)。
+
+応答待ちのyobirinプロセスへSIGTERMを送ると、キャンセルとして扱われます。自分が配信した通知を通知センターから削除したうえで `{"result":"canceled"}` を出力して終了します (`--exit-code` 指定時は終了コード5)。`--group` の文字列はプロセスのargvに載っているので、hookから1行で古い通知を片付けられます。
+
+```bash
+# hookは応答待ちプロセスを殺すことで、古い通知を片付けられる
+pkill -f "dotfiles-wezterm-${SESSION_ID}"
+```
+
+PIDを管理する必要はありません。SIGINTは対象外で、既定の動作のままです。
 
 ### 待機中プロセスの一覧
 

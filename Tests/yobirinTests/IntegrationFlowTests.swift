@@ -47,7 +47,7 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
         completionHandler?(nil)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping ([UNNotification]) -> Void) {
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping ([String]) -> Void) {
         completionHandler([])
     }
 
@@ -203,13 +203,17 @@ final class IntegrationFlowTests: XCTestCase {
 
         client.pendingAuthorizationCompletion?(true, nil)
 
+        // 置換走査の非同期化 (design.md Implementation Notes) により、同期部分の
+        // setNotificationCategoriesが一覧取得 → 削除 → add より先に実行される。
         XCTAssertEqual(
             recorder.events,
-            ["removeDeliveredNotifications", "setNotificationCategories", "add"],
-            "認可 → 除去 → 配信 の順で、コンポーネントをまたいで守られること"
+            ["setNotificationCategories", "removeDeliveredNotifications", "add"],
+            "認可 → 配信 (category登録 → 置換走査 → add) の順で、コンポーネントをまたいで守られること"
         )
-        XCTAssertEqual(client.removeDeliveredCalls, [["build"]])
-        XCTAssertEqual(client.addedRequests.first?.identifier, "build")
+        XCTAssertEqual(client.removeDeliveredCalls, [[]], "モックの配信済み一覧が空のため削除対象も空")
+        let identifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+        XCTAssertTrue(identifier.hasPrefix(NotificationIdentity.replacementPrefix(group: "build")))
+        XCTAssertNotEqual(identifier, "build", "identifierはもはやgroupそのものではない (research.md DD-1)")
     }
 
     func testFullChainWithoutGroupNeverRemovesExistingNotifications() throws {
@@ -402,4 +406,208 @@ final class OutputPolicyIntegrationTests: XCTestCase {
 
 private struct FlowNoopCancellable: Cancellable {
     func cancel() {}
+}
+
+// MARK: - Cancellation full-chain ordering (Task 4.1: Requirements 2.2, 2.3, 3.2, 3.3, 1.6)
+
+/// SIGTERMキャンセルの結合順序を固定する。`NotificationSession` (実物) + `MockNotificationCenterClient`
+/// を `onResult` で `ResultEmitter.forResult(policy:)` → `ExitCoordinator.finish` (writer / scheduler /
+/// exit をモック) へ連結し、design.md System Flows「SIGTERMキャンセル」の
+/// 「キャンセル確定 → 自通知の削除 → 出力 → 遅延exit」の順序を、コンポーネントをまたいで検証する。
+/// 個別コンポーネントの網羅的な検証は `NotificationSessionTests` の `handleCancel` 系 /
+/// `OutputTests` の `canceled` 出力方針に委ね、ここでは連鎖順序と既存5種の連鎖不変性だけを見る。
+final class CancellationIntegrationTests: XCTestCase {
+    private func makeRequest(group: String? = nil) -> NotificationRequest {
+        NotificationRequest(
+            title: "t", message: "m", subtitle: nil, group: group, timeout: nil,
+            actions: [], replyEnabled: false, replyPlaceholder: nil, sound: nil, image: nil
+        )
+    }
+
+    /// `IntegrationFlowTests.makeConnectedChain` と同じ配線 (`private` のため型をまたいで再利用できず、
+    /// このファイル内で複製する)。書き込み内容と終了コードも記録できるよう `writes` / `exitCodes` を
+    /// 追加し、`actions` と `policy` を差し替え可能にする。
+    private func makeCancellationChain(
+        recorder: OrderRecorder,
+        client: MockNotificationCenterClient,
+        scheduler: MockScheduler,
+        emitted: Recorder<[EmittedOutput]>,
+        writes: Recorder<[String]>,
+        exitCodes: Recorder<[Int32]>,
+        actions: [String] = [],
+        policy: OutputPolicy = .default
+    ) -> (flow: AppFlow, session: NotificationSession) {
+        let onOutput: (EmittedOutput) -> Void = { output in
+            emitted.append(output)
+            ExitCoordinator.finish(
+                output,
+                writer: { destination, text in
+                    recorder.record("output:\(destination)")
+                    writes.append(text)
+                },
+                scheduler: scheduler.schedule,
+                exit: { code in
+                    recorder.record("exit")
+                    exitCodes.append(code)
+                }
+            )
+        }
+        let session = NotificationSession(
+            client: client,
+            actions: actions,
+            onResult: { result in
+                onOutput(ResultEmitter.forResult(ResultOutput(result: result, deliveredAt: nil), policy: policy))
+            }
+        )
+        let flow = AppFlow(client: client, session: session, scheduler: scheduler.schedule, onOutput: onOutput)
+        return (flow, session)
+    }
+
+    // MARK: - 1. Order: cancel confirmation -> own-identifier removal -> output write -> delayed exit
+    // (Requirements 2.2, 2.3, 1.6)
+
+    func testFullChainCancelOrdersOwnIdentifierRemovalThenOutputThenDelayedExit() throws {
+        let recorder = OrderRecorder()
+        let client = MockNotificationCenterClient(recorder: recorder)
+        let scheduler = MockScheduler()
+        let emitted = Recorder<[EmittedOutput]>([])
+        let writes = Recorder<[String]>([])
+        let exitCodes = Recorder<[Int32]>([])
+        let (flow, session) = makeCancellationChain(
+            recorder: recorder, client: client, scheduler: scheduler,
+            emitted: emitted, writes: writes, exitCodes: exitCodes)
+
+        flow.start(makeRequest(group: "cancel-order"))
+        client.pendingAuthorizationCompletion?(true, nil)
+
+        // 配信 (category登録 → group置換走査 → add) が完了した時点までのイベント数を基準にする。
+        XCTAssertEqual(recorder.events, ["setNotificationCategories", "removeDeliveredNotifications", "add"])
+        let deliveredEventCount = recorder.events.count
+        let deliveredIdentifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+
+        session.handleCancel()
+
+        // キャンセル確定 → 自分のidentifierの削除 → 出力書き込み、の順で新規イベントが積まれる。
+        // 遅延exitタイマーはまだ発火していないためexitはまだ記録されない。
+        let eventsAfterCancel = Array(recorder.events.dropFirst(deliveredEventCount))
+        XCTAssertEqual(
+            eventsAfterCancel, ["removeDeliveredNotifications", "output:stdout"],
+            "design.md SIGTERMキャンセルのフロー通り、削除 → 出力の順で記録されること")
+        XCTAssertEqual(
+            client.removeDeliveredCalls.last, [deliveredIdentifier],
+            "削除対象は自分が配信したidentifierのみであること (group置換走査の削除と取り違えないこと)")
+        XCTAssertFalse(recorder.events.contains("exit"), "遅延exitが発火するまでexitは呼ばれない")
+        XCTAssertEqual(writes.value, ["{\"result\":\"canceled\"}"])
+
+        scheduler.fire(at: scheduler.scheduledCalls.count - 1)  // 遅延exitタイマーを発火
+
+        XCTAssertEqual(recorder.events.last, "exit", "出力の後にexitが続くこと")
+        XCTAssertEqual(exitCodes.value, [0], "--exit-code未指定時はcanceledでもexit 0")
+    }
+
+    // MARK: - 2. --exit-code and canceled (Requirements 3.2, 3.3)
+
+    func testCancelExitCodeIsFiveWhenExitCodeEnabled() throws {
+        let result = runCancelFlow(policy: OutputPolicy(exitCodeEnabled: true, printField: nil))
+        XCTAssertEqual(result.exitCodes, [ResultEmitter.canceledExitCode])
+        XCTAssertEqual(result.exitCodes, [5])
+    }
+
+    func testCancelExitCodeIsZeroWithoutExitCodeFlag() throws {
+        let result = runCancelFlow(policy: .default)
+        XCTAssertEqual(result.exitCodes, [0])
+    }
+
+    // MARK: - 3. --print result / --print text and canceled (Requirement 2.2 「既存の結果出力と同じ経路」)
+
+    func testCancelPrintResultWritesTheRawCanceledValue() throws {
+        let result = runCancelFlow(policy: OutputPolicy(exitCodeEnabled: false, printField: .result))
+        XCTAssertEqual(result.writes, ["canceled"])
+    }
+
+    func testCancelPrintTextWritesNothing() throws {
+        let result = runCancelFlow(policy: OutputPolicy(exitCodeEnabled: true, printField: .text))
+        XCTAssertTrue(result.writes.isEmpty, "canceledにtextフィールドは存在しないため書き込みが発生しないこと")
+        XCTAssertEqual(result.exitCodes, [5], "書き込みがなくても終了コードは結果に対応すること (Requirement 2.4系の踏襲)")
+    }
+
+    /// `policy` を差し替えてキャンセルを結合チェーンで1回流し、書き込み内容と終了コードを返す。
+    private func runCancelFlow(policy: OutputPolicy) -> (writes: [String], exitCodes: [Int32]) {
+        let recorder = OrderRecorder()
+        let client = MockNotificationCenterClient(recorder: recorder)
+        let scheduler = MockScheduler()
+        let emitted = Recorder<[EmittedOutput]>([])
+        let writes = Recorder<[String]>([])
+        let exitCodes = Recorder<[Int32]>([])
+        let (flow, session) = makeCancellationChain(
+            recorder: recorder, client: client, scheduler: scheduler,
+            emitted: emitted, writes: writes, exitCodes: exitCodes, policy: policy)
+
+        flow.start(makeRequest())
+        client.pendingAuthorizationCompletion?(true, nil)
+        session.handleCancel()
+        scheduler.fire(at: scheduler.scheduledCalls.count - 1)
+
+        return (writes.value, exitCodes.value)
+    }
+
+    // MARK: - 4. Existing 5 result kinds remain unchanged through the same connected chain
+    // (Requirement 1.6, 3.6 の結合チェーン版)
+
+    func testFullChainAllSixResultKindsProduceUnchangedJSONAndExitCode() throws {
+        let cases:
+            [(name: String, actions: [String], trigger: (NotificationSession) -> Void, json: String, exitCode: Int32)] =
+                [
+                    (
+                        "clicked", [],
+                        { $0.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil) },
+                        "{\"result\":\"clicked\"}", 0
+                    ),
+                    (
+                        "action", ["Approve"],
+                        {
+                            $0.handleResponse(
+                                actionIdentifier: NotificationSessionIdentifiers.actionIdentifier(forIndex: 0),
+                                userText: nil)
+                        },
+                        "{\"result\":\"action\",\"action\":\"Approve\",\"actionIndex\":0}", 10
+                    ),
+                    (
+                        "replied", [],
+                        {
+                            $0.handleResponse(
+                                actionIdentifier: NotificationSessionIdentifiers.replyActionIdentifier, userText: "hi")
+                        },
+                        "{\"result\":\"replied\",\"text\":\"hi\"}", 0
+                    ),
+                    (
+                        "dismissed", [],
+                        { $0.handleResponse(actionIdentifier: UNNotificationDismissActionIdentifier, userText: nil) },
+                        "{\"result\":\"dismissed\"}", 3
+                    ),
+                    ("timeout", [], { $0.handleTimeout() }, "{\"result\":\"timeout\"}", 4),
+                    ("canceled", [], { $0.handleCancel() }, "{\"result\":\"canceled\"}", 5),
+                ]
+
+        for testCase in cases {
+            let recorder = OrderRecorder()
+            let client = MockNotificationCenterClient(recorder: recorder)
+            let scheduler = MockScheduler()
+            let emitted = Recorder<[EmittedOutput]>([])
+            let writes = Recorder<[String]>([])
+            let exitCodes = Recorder<[Int32]>([])
+            let (flow, session) = makeCancellationChain(
+                recorder: recorder, client: client, scheduler: scheduler,
+                emitted: emitted, writes: writes, exitCodes: exitCodes, actions: testCase.actions,
+                policy: OutputPolicy(exitCodeEnabled: true, printField: nil))
+
+            flow.start(makeRequest())
+            client.pendingAuthorizationCompletion?(true, nil)
+            testCase.trigger(session)
+            scheduler.fire(at: scheduler.scheduledCalls.count - 1)
+
+            XCTAssertEqual(writes.value, [testCase.json], "\(testCase.name): 結合チェーンでのJSON出力が不変であること")
+            XCTAssertEqual(exitCodes.value, [testCase.exitCode], "\(testCase.name): 結合チェーンでの終了コードが不変であること")
+        }
+    }
 }

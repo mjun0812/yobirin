@@ -3,21 +3,20 @@ import XCTest
 
 @testable import yobirin
 
-/// `NotificationCenterClient` のモック。`getDeliveredNotifications` は実UNの挙動
+/// `NotificationCenterClient` のモック。`getDeliveredNotificationIdentifiers` は実UNの挙動
 /// (バックグラウンドスレッドからの非同期コールバック) を模してバックグラウンドキューで発火する。
 ///
-/// - Note: `UNNotification` は designated initializer が `NS_UNAVAILABLE` のため
-///   テストコードから直接構築できない (SDK制約)。そのため `getDeliveredNotifications` は
-///   常に空配列を返す。「配信済み通知が0件のときも掃除経路が正しく完了すること」
-///   「実際に返された通知の数だけ削除識別子を作ること」は本モックの実装 (`notifications.map`)
-///   がidentifier抽出そのものであり、空配列以外のフィクスチャでの検証はSDK制約によりできない
-///   (CONCERNSに記録)。
+/// - Note: プロトコルが `UNNotification` ではなく識別名の文字列列を返す形へ置き換わったため、
+///   `deliveredIdentifiers` へ任意の識別名を設定してモックへ注入できる。以前は `UNNotification`
+///   の designated initializer が `NS_UNAVAILABLE` でテストコードから直接構築できず
+///   (SDK制約)、空配列以外のフィクスチャでの掃除検証ができなかったが、この制約は解消された。
 private final class MockNotificationCenterClient: NotificationCenterClient, @unchecked Sendable {
     private(set) var requestAuthorizationCallCount = 0
     private(set) var setCategoriesCalls: [Set<UNNotificationCategory>] = []
     private(set) var removeDeliveredCalls: [[String]] = []
     private(set) var addedRequests: [UNNotificationRequest] = []
-    private(set) var getDeliveredNotificationsCallCount = 0
+    private(set) var getDeliveredNotificationIdentifiersCallCount = 0
+    var deliveredIdentifiers: [String] = []
 
     func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
         requestAuthorizationCallCount += 1
@@ -36,10 +35,11 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
         completionHandler?(nil)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
-        getDeliveredNotificationsCallCount += 1
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {
+        getDeliveredNotificationIdentifiersCallCount += 1
+        let identifiers = deliveredIdentifiers
         DispatchQueue.global().async {
-            completionHandler([])
+            completionHandler(identifiers)
         }
     }
 
@@ -47,7 +47,7 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
     func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {}
 }
 
-/// `getDeliveredNotifications` の completionHandler を一切呼び出さないモック。
+/// `getDeliveredNotificationIdentifiers` の completionHandler を一切呼び出さないモック。
 /// UN側が稀にハングするケース (Apple Forums 746045) を模し、`cleanUpAndExit` の
 /// `timeout` が上限として機能することを検証するために使う。
 private final class NeverCompletingNotificationCenterClient: NotificationCenterClient, @unchecked Sendable {
@@ -59,7 +59,7 @@ private final class NeverCompletingNotificationCenterClient: NotificationCenterC
 
     func add(_ request: UNNotificationRequest, completionHandler: ((Error?) -> Void)?) {}
 
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {
         // 意図的にcompletionHandlerを呼ばない (ハングを再現)。
     }
 
@@ -134,7 +134,23 @@ final class LaunchGuardTests: XCTestCase {
         LaunchGuard.cleanUpAndExit(client: client, exit: { _ in expectation.fulfill() })
 
         wait(for: [expectation], timeout: 1.0)
-        XCTAssertEqual(client.getDeliveredNotificationsCallCount, 1)
+        XCTAssertEqual(client.getDeliveredNotificationIdentifiersCallCount, 1)
+    }
+
+    // MARK: - 配信済み通知が複数件のとき、全件が削除される (Requirements 6.3, 12.3)
+
+    func testCleanUpAndExitRemovesAllDeliveredIdentifiersWhenMultipleAreReturned() {
+        // これまでUNNotificationをテストから構築できないSDK制約により空配列しか注入できず、
+        // 複数件削除の検証ができなかった。getDeliveredNotificationIdentifiersへの置換で
+        // 任意の識別名列を注入できるようになり、この検証が初めて可能になった。
+        let client = MockNotificationCenterClient()
+        client.deliveredIdentifiers = ["id-1", "id-2", "id-3"]
+        let expectation = expectation(description: "exit called")
+
+        LaunchGuard.cleanUpAndExit(client: client, exit: { _ in expectation.fulfill() })
+
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(client.removeDeliveredCalls, [["id-1", "id-2", "id-3"]])
     }
 
     func testCleanUpAndExitRemovesDeliveredNotificationsBeforeExiting() {
@@ -178,7 +194,7 @@ final class LaunchGuardTests: XCTestCase {
     // MARK: - Exit must not happen synchronously before the async cleanup completes (Requirement 6.3)
 
     func testCleanUpAndExitDoesNotExitSynchronouslyBeforeCleanupCompletes() {
-        // getDeliveredNotificationsの完了はバックグラウンドスレッドから来る想定 (実UNの挙動)。
+        // getDeliveredNotificationIdentifiersの完了はバックグラウンドスレッドから来る想定 (実UNの挙動)。
         // exitがそのバックグラウンド完了経由でのみ呼ばれ、cleanUpAndExit呼び出しのその場
         // (呼び出し元スレッド上) で同期的に呼ばれていないことを確認する。
         let client = MockNotificationCenterClient()
@@ -196,7 +212,7 @@ final class LaunchGuardTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
         XCTAssertTrue(
             exitCalledFromBackgroundCompletion.value,
-            "exit must be driven by the async getDeliveredNotifications completion, not called inline synchronously"
+            "exit must be driven by the async getDeliveredNotificationIdentifiers completion, not called inline synchronously"
         )
     }
 

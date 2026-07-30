@@ -16,12 +16,12 @@ enum LaunchGuard {
         arguments.count <= 1
     }
 
-    /// 通知を配信せず、`getDeliveredNotifications` で取得した配信済み通知(このバンドルのもの
-    /// しか見えない)を全て削除し、削除件数を `completion` へ渡す (Requirements 6.3, 12.3)。
+    /// 通知を配信せず、`getDeliveredNotificationIdentifiers` で取得した配信済み通知(このバンドルの
+    /// もの しか見えない)を全て削除し、削除件数を `completion` へ渡す (Requirements 6.3, 12.3)。
     ///
     /// 掃除完了後に後続処理を行うこと(fire-and-forgetでexitすると掃除が走る前にプロセスが死ぬ)を
     /// 保証するため、`removeDeliveredNotifications` の呼び出しと `completion` は
-    /// `getDeliveredNotifications` の completionHandler 内で順に行う。呼び出し元は本関数が
+    /// `getDeliveredNotificationIdentifiers` の completionHandler 内で順に行う。呼び出し元は本関数が
     /// returnした直後にプロセスをexitさせうるため、この非同期completionが完了するまで本関数
     /// 自体を同期的にブロックする。
     ///
@@ -60,7 +60,7 @@ enum LaunchGuard {
 }
 
 /// `client` (`Sendable` に準拠しない `NotificationCenterClient` existential) を
-/// `getDeliveredNotifications` の `@Sendable` completionHandler内で安全に捕捉するための
+/// `getDeliveredNotificationIdentifiers` の `@Sendable` completionHandler内で安全に捕捉するための
 /// 薄いラッパー。`AppFlow` が同種の問題を `@unchecked Sendable` で解決しているのと同じパターン。
 private final class DeliveredNotificationSweep: @unchecked Sendable {
     private let client: NotificationCenterClient
@@ -72,8 +72,7 @@ private final class DeliveredNotificationSweep: @unchecked Sendable {
     }
 
     func run() {
-        client.getDeliveredNotifications { notifications in
-            let identifiers = notifications.map { $0.request.identifier }
+        client.getDeliveredNotificationIdentifiers { identifiers in
             self.client.removeDeliveredNotifications(withIdentifiers: identifiers)
             self.completion(identifiers.count)
         }

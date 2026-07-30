@@ -225,8 +225,16 @@ struct NotifyCommand: ParsableCommand {
                 )
             }
         )
+        // 通知系経路の冒頭 (認可要求より前) で登録する (design.md CancellationSignal、
+        // Requirements 2.5, 2.6)。`application.run()` は返らないため、このスタックフレーム上の
+        // `withExtendedLifetime` による保持がプロセス生存中の受信を保証する
+        // (design.md CancellationSignal Postconditions)。
+        let cancellationSource = CancellationSignal.install { delegate.handleCancel() }
+
         let application = NSApplication.shared
         application.delegate = delegate
-        application.run()
+        withExtendedLifetime(cancellationSource) {
+            application.run()
+        }
     }
 }

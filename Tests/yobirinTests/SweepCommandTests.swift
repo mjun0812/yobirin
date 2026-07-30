@@ -3,15 +3,15 @@ import XCTest
 
 @testable import yobirin
 
-/// - Note (SDK制約): `UNNotification` はテストコードから直接構築できないため、モックの
-///   `getDeliveredNotifications` は常に空配列を返す。したがって「0件以外の件数が表示に反映
-///   されること」は自動テストできない (`LaunchGuardTests` が既に同じ制約を記録している)。
-///   ここでは0件時の表示形式と、削除呼び出しが1回だけ走ることを固定する。
+/// `getDeliveredNotificationIdentifiers` はモックが返す識別名列をそのまま呼び出し元へ渡す。
+/// 識別名列は `NotificationCenterClient` がidentifier文字列を返す形になったことで、
+/// 空配列以外のフィクスチャも注入できる (`LaunchGuardTests` の掃除検証と同じ改善)。
 private final class MockNotificationCenterClient: NotificationCenterClient, @unchecked Sendable {
     private(set) var requestAuthorizationCallCount = 0
     private(set) var addedRequests: [UNNotificationRequest] = []
     private(set) var removeDeliveredCalls: [[String]] = []
-    private(set) var getDeliveredNotificationsCallCount = 0
+    private(set) var getDeliveredNotificationIdentifiersCallCount = 0
+    var deliveredIdentifiers: [String] = []
 
     func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
         requestAuthorizationCallCount += 1
@@ -27,10 +27,11 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
         addedRequests.append(request)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
-        getDeliveredNotificationsCallCount += 1
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping @Sendable ([String]) -> Void) {
+        getDeliveredNotificationIdentifiersCallCount += 1
+        let identifiers = deliveredIdentifiers
         DispatchQueue.global().async {
-            completionHandler([])
+            completionHandler(identifiers)
         }
     }
 
@@ -70,7 +71,7 @@ final class SweepCommandTests: XCTestCase {
         LaunchGuard.sweepDeliveredNotifications(client: client) { count.set($0) }
 
         XCTAssertEqual(count.value, 0)
-        XCTAssertEqual(client.getDeliveredNotificationsCallCount, 1)
+        XCTAssertEqual(client.getDeliveredNotificationIdentifiersCallCount, 1)
         XCTAssertEqual(client.removeDeliveredCalls, [[]])
     }
 
@@ -100,6 +101,25 @@ final class SweepCommandTests: XCTestCase {
         )
 
         XCTAssertEqual(written.value, ["Removed 0 delivered notification(s)"])
+        XCTAssertEqual(exitCodes.value, [0])
+    }
+
+    /// 複数件の識別名が返った場合、その件数が表示に反映される
+    /// (これまで `UNNotification` をテストから構築できないSDK制約により0件しか検証できなかった。
+    /// `getDeliveredNotificationIdentifiers` への置換でその制約が解消された)。
+    func testPerformReportsANonZeroRemovedCount() throws {
+        let client = MockNotificationCenterClient()
+        client.deliveredIdentifiers = ["id-1", "id-2", "id-3"]
+        let written = Recorder<[String]>([])
+        let exitCodes = Recorder<[Int32]>([])
+
+        SweepCommand.perform(
+            client: client,
+            stdoutWriter: { written.set(written.value + [$0]) },
+            exit: { exitCodes.set(exitCodes.value + [$0]) }
+        )
+
+        XCTAssertEqual(written.value, ["Removed 3 delivered notification(s)"])
         XCTAssertEqual(exitCodes.value, [0])
     }
 

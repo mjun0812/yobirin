@@ -14,6 +14,23 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     private(set) var addedRequests: [UNNotificationRequest] = []
     private(set) var callOrder: [String] = []
 
+    /// `getDeliveredNotificationIdentifiers` が返す識別名列。group置換走査のテストで注入する
+    /// (task 2.1。既定は空配列で、従来どおりの挙動を保つ)。
+    var deliveredIdentifiersToReturn: [String] = []
+
+    /// true のとき `getDeliveredNotificationIdentifiers` のcompletionHandlerをすぐに呼ばず
+    /// `pendingCompletionHandler` に保持する。group置換走査の途中でキャンセルが確定する
+    /// レースを再現するため (task 2.2, Requirement 2.5 非同期ガード)。
+    var deferCompletionHandler = false
+    private var pendingCompletionHandler: (([String]) -> Void)?
+
+    /// 保留していたcompletionHandlerを手動で発火する。
+    func firePendingCompletionHandler() {
+        let handler = pendingCompletionHandler
+        pendingCompletionHandler = nil
+        handler?(deliveredIdentifiersToReturn)
+    }
+
     func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
         completionHandler(true, nil)
     }
@@ -34,8 +51,12 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
         completionHandler?(nil)
     }
 
-    func getDeliveredNotifications(completionHandler: @escaping ([UNNotification]) -> Void) {
-        completionHandler([])
+    func getDeliveredNotificationIdentifiers(completionHandler: @escaping ([String]) -> Void) {
+        if deferCompletionHandler {
+            pendingCompletionHandler = completionHandler
+        } else {
+            completionHandler(deliveredIdentifiersToReturn)
+        }
     }
 
     /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
@@ -151,18 +172,43 @@ final class NotificationSessionTests: XCTestCase {
         XCTAssertEqual(replyAction.textInputPlaceholder, "返信を入力")
     }
 
-    // MARK: - Group replacement ordering (Requirements 2.1, 2.2)
+    // MARK: - Group replacement ordering (Requirements 1.1-1.5, 2.1, 2.2)
 
-    func testDeliverWithGroupRemovesExistingBeforeAddingUsingGroupAsIdentifier() throws {
+    func testDeliverWithGroupUsesNewIdentifierSchemeAndOrdersSetCategoriesThenRemoveThenAdd() throws {
         let client = MockNotificationCenterClient()
         let session = NotificationSession(client: client, actions: [], onResult: { _ in })
         let request = makeRequest(group: "build")
 
         try session.deliver(request)
 
-        XCTAssertEqual(client.removeDeliveredCalls, [["build"]])
-        XCTAssertEqual(client.callOrder, ["removeDeliveredNotifications", "setNotificationCategories", "add"])
-        XCTAssertEqual(client.addedRequests.first?.identifier, "build")
+        // 置換走査の非同期化 (design.md Implementation Notes) により、同期部分の
+        // setNotificationCategoriesが一覧取得 → 削除 → add より先に実行される。
+        XCTAssertEqual(client.callOrder, ["setNotificationCategories", "removeDeliveredNotifications", "add"])
+        let identifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+        XCTAssertTrue(identifier.hasPrefix(NotificationIdentity.replacementPrefix(group: "build")))
+        XCTAssertNotEqual(identifier, "build", "identifierはもはやgroupそのものではない (research.md DD-1)")
+    }
+
+    /// モックが返す識別名列 (自group 2件 + 先頭部分が重なる別group 1件 + groupなし1件) から
+    /// 自groupの2件だけが削除されることを固定する (task 2.1, Requirement 1.1, 1.2, 1.4, 1.5)。
+    func testDeliverWithGroupRemovesOnlyOwnGroupIdentifiersFromDeliveredList() throws {
+        let client = MockNotificationCenterClient()
+        let session = NotificationSession(client: client, actions: [], onResult: { _ in })
+        let ownGroup = "abc"
+        // base64("abc") は base64("abcd") の接頭辞だが、"#" 終端により識別名としては
+        // 一致しない (research.md DD-1)。先頭部分が重なる別groupの代表例として使う。
+        let overlappingGroup = "abcd"
+        let ownPrefix = NotificationIdentity.replacementPrefix(group: ownGroup)
+        let own1 = ownPrefix + UUID().uuidString
+        let own2 = ownPrefix + UUID().uuidString
+        let overlappingIdentifier = NotificationIdentity.makeIdentifier(group: overlappingGroup)
+        let noGroupIdentifier = NotificationIdentity.makeIdentifier(group: nil)
+        client.deliveredIdentifiersToReturn = [own1, own2, overlappingIdentifier, noGroupIdentifier]
+        let request = makeRequest(group: ownGroup)
+
+        try session.deliver(request)
+
+        XCTAssertEqual(client.removeDeliveredCalls, [[own1, own2]])
     }
 
     func testDeliverWithoutGroupDoesNotRemoveExisting() throws {
@@ -377,6 +423,117 @@ final class NotificationSessionTests: XCTestCase {
         XCTAssertEqual(results, [.clicked])
     }
 
+    /// セッションAのtimeoutが、モック上のセッションBの識別名を削除しないことを固定する
+    /// (task 2.1, 修正対象のバグの回帰テスト。Requirement 1.1, 1.2)。
+    func testHandleTimeoutOfOneSessionDoesNotRemoveAnotherSessionsIdentifierOnSharedClient() throws {
+        let client = MockNotificationCenterClient()
+        let sessionA = NotificationSession(client: client, actions: [], onResult: { _ in })
+        let sessionB = NotificationSession(client: client, actions: [], onResult: { _ in })
+
+        try sessionA.deliver(makeRequest(group: "build"))
+        let identifierA = try XCTUnwrap(client.addedRequests[0].identifier)
+        try sessionB.deliver(makeRequest(group: "build"))
+        let identifierB = try XCTUnwrap(client.addedRequests[1].identifier)
+
+        XCTAssertNotEqual(identifierA, identifierB, "同一groupでも識別名は毎回別採番であること")
+
+        sessionA.handleTimeout()
+
+        XCTAssertEqual(client.removeDeliveredCalls.last, [identifierA])
+        XCTAssertFalse(
+            client.removeDeliveredCalls.flatMap { $0 }.contains(identifierB),
+            "セッションAのtimeoutがセッションBの識別名を削除してはならない"
+        )
+    }
+
+    // MARK: - Cancellation (Requirements 2.1, 2.4, 2.5, 1.1)
+
+    /// SIGTERMによるキャンセル入力。自分の識別名を削除してから `.canceled` で確定する
+    /// (design.md System Flows「SIGTERMキャンセル」、既存のtimeoutテストと同じパターン)。
+    func testHandleCancelRemovesDeliveredNotificationBeforeEmittingResult() throws {
+        let client = MockNotificationCenterClient()
+        var removalCountAtEmitTime = -1
+        var results: [NotificationResult] = []
+        let session = NotificationSession(
+            client: client,
+            actions: [],
+            onResult: { result in
+                removalCountAtEmitTime = client.removeDeliveredCalls.count
+                results.append(result)
+            }
+        )
+        let request = makeRequest()
+        try session.deliver(request)
+        let deliveredIdentifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+
+        session.handleCancel()
+
+        XCTAssertEqual(removalCountAtEmitTime, 1)
+        XCTAssertEqual(client.removeDeliveredCalls, [[deliveredIdentifier]])
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// 応答で確定済みの場合、後から来る `handleCancel` は既存の一度きり確定機構により無視される
+    /// (Requirement 2.4: 先着が勝つ)。
+    func testHandleCancelAfterResponseIsIgnored() throws {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+        let request = makeRequest()
+        try session.deliver(request)
+
+        session.handleResponse(actionIdentifier: UNNotificationDefaultActionIdentifier, userText: nil)
+        session.handleCancel()
+
+        XCTAssertEqual(results, [.clicked])
+        XCTAssertTrue(client.removeDeliveredCalls.isEmpty, "clicked確定は通知を削除しないため、後続のcancelでも削除は増えない")
+    }
+
+    /// 配信前にキャンセルが確定した場合、`deliver` の同期部分冒頭のガードにより
+    /// category登録・addのいずれも行われない (Requirement 2.5、research.md DD-4)。
+    func testDeliverAfterCancelDoesNotAddNotification() throws {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+
+        session.handleCancel()
+        try session.deliver(makeRequest())
+
+        XCTAssertTrue(client.addedRequests.isEmpty)
+        XCTAssertTrue(client.setCategoriesCalls.isEmpty)
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// group置換走査 (非同期completion) の途中でキャンセルが確定した場合、completion内の
+    /// `add` 直前のガードにより配信が握り潰される (Requirement 2.5、research.md DD-4)。
+    /// これを怠るとレースで孤児通知が出る。
+    func testCancelDuringGroupReplacementScanPreventsAdd() throws {
+        let client = MockNotificationCenterClient()
+        client.deferCompletionHandler = true
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+        let request = makeRequest(group: "build")
+
+        try session.deliver(request)
+        session.handleCancel()
+        client.firePendingCompletionHandler()
+
+        XCTAssertTrue(client.addedRequests.isEmpty, "走査完了時点で確定済みならaddを握り潰す")
+        XCTAssertEqual(results, [.canceled])
+    }
+
+    /// 未配信 (`deliver` 未呼び出し) のキャンセルは、削除なしで `.canceled` として確定する。
+    func testHandleCancelWithoutPriorDeliverCommitsWithoutRemoval() {
+        let client = MockNotificationCenterClient()
+        var results: [NotificationResult] = []
+        let session = NotificationSession(client: client, actions: [], onResult: { results.append($0) })
+
+        session.handleCancel()
+
+        XCTAssertTrue(client.removeDeliveredCalls.isEmpty)
+        XCTAssertEqual(results, [.canceled])
+    }
+
     func testConcurrentResponsesCommitExactlyOnce() {
         let counterLock = NSLock()
         var callCount = 0
@@ -399,5 +556,74 @@ final class NotificationSessionTests: XCTestCase {
         }
 
         XCTAssertEqual(callCount, 1)
+    }
+}
+
+/// `NotificationIdentity` の不変条件テスト (design.md NotificationIdentity, research.md DD-1)。
+final class NotificationIdentityTests: XCTestCase {
+    /// 符号化結果が接頭辞関係になる組を含む、先頭部分が重なる group の組。
+    private static let overlappingGroupPairs: [(String, String)] = [
+        ("a", "ab"),
+        ("a", "a#b"),
+        ("abc", "abcd"),
+    ]
+
+    // MARK: - makeIdentifier(group:) は常に自 group の replacementPrefix を接頭辞に持つ (Requirement 1.4, 1.5)
+
+    func testMakeIdentifierWithGroupHasOwnReplacementPrefix() {
+        for group in ["build", "a", "ab", "a#b", "abc", "abcd", "日本語", "#"] {
+            let identifier = NotificationIdentity.makeIdentifier(group: group)
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertTrue(identifier.hasPrefix(prefix), "group: \(group)")
+        }
+    }
+
+    func testMakeIdentifierWithoutGroupIsUUIDAlone() {
+        let identifier = NotificationIdentity.makeIdentifier(group: nil)
+        XCTAssertNotNil(UUID(uuidString: identifier))
+    }
+
+    // MARK: - 先頭部分が重なる別 group の接頭辞は互いに一致しない (Requirement 1.4)
+
+    func testReplacementPrefixesOfOverlappingGroupsDoNotMatchEachOther() {
+        for (lhs, rhs) in Self.overlappingGroupPairs {
+            let lhsPrefix = NotificationIdentity.replacementPrefix(group: lhs)
+            let rhsPrefix = NotificationIdentity.replacementPrefix(group: rhs)
+            XCTAssertFalse(lhsPrefix.hasPrefix(rhsPrefix), "\(lhs) prefix vs \(rhs) prefix")
+            XCTAssertFalse(rhsPrefix.hasPrefix(lhsPrefix), "\(rhs) prefix vs \(lhs) prefix")
+        }
+    }
+
+    func testReplacementPrefixDoesNotMatchOtherOverlappingGroupIdentifier() {
+        for (lhs, rhs) in Self.overlappingGroupPairs {
+            let lhsPrefix = NotificationIdentity.replacementPrefix(group: lhs)
+            let rhsIdentifier = NotificationIdentity.makeIdentifier(group: rhs)
+            XCTAssertFalse(rhsIdentifier.hasPrefix(lhsPrefix), "\(lhs) prefix vs \(rhs) identifier")
+
+            let rhsPrefix = NotificationIdentity.replacementPrefix(group: rhs)
+            let lhsIdentifier = NotificationIdentity.makeIdentifier(group: lhs)
+            XCTAssertFalse(lhsIdentifier.hasPrefix(rhsPrefix), "\(rhs) prefix vs \(lhs) identifier")
+        }
+    }
+
+    // MARK: - group なしの識別名はいかなる replacementPrefix にも一致しない (Requirement 1.5)
+
+    func testIdentifierWithoutGroupDoesNotMatchAnyReplacementPrefix() {
+        let identifier = NotificationIdentity.makeIdentifier(group: nil)
+        for group in ["build", "a", "ab", "a#b", "abc", "abcd", "日本語", "#"] {
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertFalse(identifier.hasPrefix(prefix), "group: \(group)")
+        }
+    }
+
+    // MARK: - `#` や非ASCIIを含む group の往復 (research.md DD-1)
+
+    func testMakeIdentifierRoundTripsForHashAndNonASCIIGroups() {
+        for group in ["a#b", "#", "日本語"] {
+            let identifier = NotificationIdentity.makeIdentifier(group: group)
+            let prefix = NotificationIdentity.replacementPrefix(group: group)
+            XCTAssertTrue(identifier.hasPrefix(prefix), "group: \(group)")
+            XCTAssertFalse(identifier.dropFirst(prefix.count).isEmpty, "group: \(group)")
+        }
     }
 }
