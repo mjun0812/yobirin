@@ -98,6 +98,7 @@ Sources/yobirin/
 | `Sources/yobirin/NotificationCenterClient.swift` | `getDeliveredNotifications` を `getDeliveredNotificationIdentifiers` へ置換                                                             | 1.3 (走査), テスト容易性 |
 | `Sources/yobirin/LaunchGuard.swift`              | プロトコル変更への追随 (identifier 列で掃除。挙動等価)                                                                                  | — (回帰なしの追随)       |
 | `Sources/yobirin/Output.swift`                   | `NotificationResult.canceled` の追加、`jsonString` / `value(for:)` / `exitCode(for:)` / `canceledExitCode = 5`                          | 3.1〜3.7                 |
+| `Sources/yobirin/AppDelegate.swift`              | `handleCancel()` の追加 (`session.handleCancel()` への1行転送。session が private のため、シグナル配線から Session へ届ける唯一の経路)  | 2.5                      |
 | `Sources/yobirin/NotifyCommand.swift`            | 通知系経路の冒頭で `CancellationSignal` を登録 (認可要求より前)                                                                         | 2.5, 2.6                 |
 | `Tests/yobirinTests/*`                           | モック5クラスのプロトコル追随、新規テスト                                                                                               | —                        |
 | `README.md` / `README.ja.md`                     | 結果種別・終了コード表・キャンセル運用の追記                                                                                            | 4.1〜4.3                 |
