@@ -142,7 +142,7 @@ final class AppFlowTests: XCTestCase {
         XCTAssertEqual(emitted.count, 1)
         XCTAssertEqual(emitted.first?.destination, .stderr)
         XCTAssertEqual(emitted.first?.exitCode, 2)
-        XCTAssertFalse(emitted.first?.text.contains("\"result\"") ?? true)
+        XCTAssertFalse(emitted.first?.text?.contains("\"result\"") ?? false)
         XCTAssertTrue(client.addedRequests.isEmpty)
         XCTAssertTrue(scheduler.scheduledCalls.isEmpty)
     }
@@ -161,7 +161,7 @@ final class AppFlowTests: XCTestCase {
         XCTAssertEqual(emitted.count, 1)
         XCTAssertEqual(emitted.first?.destination, .stderr)
         XCTAssertEqual(emitted.first?.exitCode, 2)
-        XCTAssertFalse(emitted.first?.text.contains("\"result\"") ?? true)
+        XCTAssertFalse(emitted.first?.text?.contains("\"result\"") ?? false)
         XCTAssertTrue(client.addedRequests.isEmpty)
     }
 

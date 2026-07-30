@@ -300,7 +300,8 @@ final class IntegrationFlowTests: XCTestCase {
         let output = try XCTUnwrap(emitted.value.first)
         XCTAssertEqual(output.destination, .stderr)
         XCTAssertNotEqual(output.exitCode, 0)
-        XCTAssertFalse(output.text.contains("\"result\""), "environment errors must never carry a result JSON")
+        XCTAssertFalse(
+            output.text?.contains("\"result\"") ?? false, "environment errors must never carry a result JSON")
         XCTAssertTrue(client.addedRequests.isEmpty, "delivery must not have gone through")
         // `scheduler` はExitCoordinatorの遅延exitスケジューリングでも使われる共有モックのため、
         // 「未スケジュール」ではなく「timeout秒 (5) のタイマーが1件もない」ことを確認する。
@@ -332,4 +333,73 @@ private final class Recorder<Value>: @unchecked Sendable {
         defer { lock.unlock() }
         return storedValue
     }
+}
+
+// MARK: - 出力方針を通した結合 (Requirements 1, 2, 3: NotifyCommand → onResult → ResultEmitter → ExitCoordinator)
+
+final class OutputPolicyIntegrationTests: XCTestCase {
+    /// 実際の通知フローを模し、結果の確定から書き込み・終了コードまでを方針つきで通す。
+    private func runFlow(
+        result: NotificationResult,
+        policy: OutputPolicy
+    ) -> (writes: [String], exitCodes: [Int32]) {
+        var writes: [String] = []
+        var scheduled: [() -> Void] = []
+        var exitCodes: [Int32] = []
+
+        let emitted = ResultEmitter.forResult(ResultOutput(result: result, deliveredAt: nil), policy: policy)
+        ExitCoordinator.finish(
+            emitted,
+            writer: { _, text in writes.append(text) },
+            scheduler: { _, work in
+                scheduled.append(work)
+                return FlowNoopCancellable()
+            },
+            exit: { exitCodes.append($0) }
+        )
+        for work in scheduled { work() }
+        return (writes, exitCodes)
+    }
+
+    func testDefaultPolicyWritesJSONAndExitsZero() throws {
+        let outcome = runFlow(result: .dismissed, policy: .default)
+        XCTAssertEqual(outcome.writes, ["{\"result\":\"dismissed\"}"])
+        XCTAssertEqual(outcome.exitCodes, [0])
+    }
+
+    func testExitCodePolicyKeepsJSONButChangesTheExitCode() throws {
+        let outcome = runFlow(
+            result: .dismissed, policy: OutputPolicy(exitCodeEnabled: true, printField: nil))
+        XCTAssertEqual(outcome.writes, ["{\"result\":\"dismissed\"}"])
+        XCTAssertEqual(outcome.exitCodes, [3])
+    }
+
+    func testPrintPolicyWritesTheRawValueOnly() throws {
+        let outcome = runFlow(
+            result: .replied(text: "next step"),
+            policy: OutputPolicy(exitCodeEnabled: false, printField: .text))
+        XCTAssertEqual(outcome.writes, ["next step"])
+        XCTAssertEqual(outcome.exitCodes, [0])
+    }
+
+    func testCombinedPolicyWritesTheValueAndSetsTheExitCode() throws {
+        let outcome = runFlow(
+            result: .action(label: "Approve", index: 1),
+            policy: OutputPolicy(exitCodeEnabled: true, printField: .actionIndex))
+        XCTAssertEqual(outcome.writes, ["1"])
+        XCTAssertEqual(outcome.exitCodes, [11])
+    }
+
+    /// 却下に対する --print text: 何も書かれず、終了コードだけが方針に従う (Requirements 2.4, 3.1)。
+    func testMissingFieldWritesNothingButExitsWithTheResultCode() throws {
+        let outcome = runFlow(
+            result: .dismissed,
+            policy: OutputPolicy(exitCodeEnabled: true, printField: .text))
+        XCTAssertTrue(outcome.writes.isEmpty)
+        XCTAssertEqual(outcome.exitCodes, [3])
+    }
+}
+
+private struct FlowNoopCancellable: Cancellable {
+    func cancel() {}
 }

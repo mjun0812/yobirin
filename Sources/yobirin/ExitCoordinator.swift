@@ -25,7 +25,11 @@ enum ExitCoordinator {
         scheduler: Scheduler,
         exit: @escaping (Int32) -> Void
     ) {
-        writer(output.destination, output.text)
+        // text が nil のときは何も書かない (Requirement 2.4: 空行も出力しない)。
+        // 遅延exitは出力の有無に関わらず行う — 再起動への防御 (Requirement 6.1) は出力とは無関係。
+        if let text = output.text {
+            writer(output.destination, text)
+        }
         _ = scheduler(delay) {
             exit(output.exitCode)
         }
