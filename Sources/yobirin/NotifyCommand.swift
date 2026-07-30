@@ -13,7 +13,22 @@ import Foundation
 struct NotifyCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "notify",
-        abstract: "Deliver a notification and print the captured response as JSON"
+        abstract: "Deliver a notification and print the captured response as JSON",
+        discussion: """
+            Examples:
+
+              Announce a finished build and give up after five minutes:
+                yobirin -t "Build finished" -m "All tests passed" --timeout 5m
+
+              Ask for approval with action buttons and branch on the exit code:
+                yobirin -t Deploy -m "Release to production?" \\
+                  -a Approve -a Reject --exit-code --timeout 10m
+                # exit 10 = Approve, 11 = Reject, 3 = dismissed, 4 = timed out
+
+              Capture a text reply without parsing JSON:
+                answer=$(yobirin -t "Claude Code" -m "Next instruction?" \\
+                  --reply --print text --timeout 5m)
+            """
     )
 
     @Option(name: [.short, .long], help: "The notification title")
@@ -53,6 +68,15 @@ struct NotifyCommand: ParsableCommand {
 
     @Option(help: "Path of an image to attach (png, jpg, jpeg, or gif)")
     var image: String?
+
+    @Flag(
+        name: .customLong("exit-code"),
+        help: "Map the result to the exit code: clicked/replied 0, dismissed 3, timeout 4, action 10+index")
+    var exitCodeEnabled = false
+
+    @Option(
+        help: "Print only this field of the result instead of the JSON (result, action, actionIndex, or text)")
+    var print: PrintField?
 
     /// 入力の検証 (Requirements 5.3, 9.1)。
     ///
@@ -126,6 +150,15 @@ struct NotifyCommand: ParsableCommand {
         return seconds
     }
 
+    /// 出力方針の構築 (Requirements 1, 2, 3)。
+    ///
+    /// `--exit-code` と `--print` の同時指定は検証エラーにしない (Requirement 3.2) —
+    /// stdoutは生値・終了コードは結果依存、という組み合わせがそのまま成立する。
+    /// 未指定なら `.default` で、従来の「JSON全体 + exit 0」を保つ。
+    func makeOutputPolicy() -> OutputPolicy {
+        OutputPolicy(exitCodeEnabled: exitCodeEnabled, printField: print)
+    }
+
     /// 本文の値がこの文字列のとき、標準入力から本文を読む (Requirement 5.1)。
     static let standardInputMarker = "-"
 
@@ -182,6 +215,7 @@ struct NotifyCommand: ParsableCommand {
         let delegate = AppDelegate(
             request: request,
             client: client,
+            outputPolicy: makeOutputPolicy(),
             onOutput: { output in
                 ExitCoordinator.finish(
                     output,

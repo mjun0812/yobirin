@@ -469,3 +469,69 @@ final class NotifyCommandImageValidationTests: XCTestCase {
         XCTAssertEqual(command.image, path)
     }
 }
+
+// MARK: - 出力方針の配線 (Requirements 2.3, 3.1, 3.2, 6.4)
+
+final class NotifyCommandOutputPolicyTests: XCTestCase {
+    func testDefaultIsTheExistingBehavior() throws {
+        let command = try NotifyCommand.parse(["-t", "t", "-m", "m"])
+        XCTAssertEqual(command.makeOutputPolicy(), .default)
+    }
+
+    func testExitCodeFlagEnablesResultDependentExitCodes() throws {
+        let command = try NotifyCommand.parse(["-t", "t", "-m", "m", "--exit-code"])
+        XCTAssertEqual(command.makeOutputPolicy(), OutputPolicy(exitCodeEnabled: true, printField: nil))
+    }
+
+    func testPrintOptionSelectsTheField() throws {
+        let command = try NotifyCommand.parse(["-t", "t", "-m", "m", "--print", "text"])
+        XCTAssertEqual(command.makeOutputPolicy(), OutputPolicy(exitCodeEnabled: false, printField: .text))
+    }
+
+    /// 同時指定は検証エラーにしない (Requirement 3.2)。
+    func testBothOptionsTogetherAreAccepted() throws {
+        let command = try NotifyCommand.parse(["-t", "t", "-m", "m", "--exit-code", "--print", "action"])
+        XCTAssertEqual(command.makeOutputPolicy(), OutputPolicy(exitCodeEnabled: true, printField: .action))
+    }
+
+    /// 未知のフィールドは引数解析の段階で拒否され、通知は配信されない (Requirement 2.3)。
+    func testUnknownPrintFieldIsRejectedAtParseTime() throws {
+        XCTAssertThrowsError(try NotifyCommand.parse(["-t", "t", "-m", "m", "--print", "deliveredAt"]))
+    }
+
+    /// --print に短縮形を割り当てない。-p はプロファイルの短縮形 (Requirement 6.4)。
+    func testPrintHasNoShortForm() throws {
+        let command = try NotifyCommand.parse(["-t", "t", "-m", "m", "-p", "claude"])
+        XCTAssertEqual(command.profile, "claude")
+        XCTAssertNil(command.makeOutputPolicy().printField)
+    }
+}
+
+// MARK: - ヘルプの説明と使用例 (Requirements 7.2, 7.3, 7.4)
+
+final class NotifyCommandHelpTests: XCTestCase {
+    private let helpText = NotifyCommand.helpMessage()
+
+    func testHelpShowsTheAbstract() throws {
+        XCTAssertFalse(NotifyCommand.configuration.abstract.isEmpty)
+        XCTAssertTrue(helpText.contains(NotifyCommand.configuration.abstract))
+    }
+
+    /// 使用例3種: 完了通知・アクションボタンによる承認確認・返信テキストの取得 (Requirement 7.3)。
+    func testHelpContainsTheThreeDocumentedExamples() throws {
+        // 完了通知 (タイムアウトつき)
+        XCTAssertTrue(helpText.contains("--timeout"), helpText)
+        // 承認確認 (アクションボタン + 終了コード分岐)
+        XCTAssertTrue(helpText.contains("--exit-code"), helpText)
+        XCTAssertTrue(helpText.contains("-a "), helpText)
+        // 返信テキストの取得
+        XCTAssertTrue(helpText.contains("--reply"), helpText)
+        XCTAssertTrue(helpText.contains("--print text"), helpText)
+    }
+
+    func testDiscussionIsWrittenInEnglish() throws {
+        XCTAssertTrue(
+            NotifyCommand.configuration.discussion.allSatisfy { $0.isASCII },
+            NotifyCommand.configuration.discussion)
+    }
+}

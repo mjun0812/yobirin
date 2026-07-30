@@ -16,9 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let session: NotificationSession
     private let appFlow: AppFlow
 
+    /// - Parameter outputPolicy: 結果確定時の出力表現と終了コードの方針 (Requirements 1, 2, 3)。
+    ///   既定は従来どおり「JSON全体 + exit 0」。認可失敗・配信失敗の経路 (`AppFlow` の
+    ///   `onOutput` 直行) には影響しない — それらは既存の予約コードを使う (Requirements 1.6, 1.7)。
     init(
         request: NotificationRequest,
         client: NotificationCenterClient,
+        outputPolicy: OutputPolicy = .default,
         onOutput: @escaping (EmittedOutput) -> Void
     ) {
         self.request = request
@@ -26,7 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             client: client,
             actions: request.actions,
             onResult: { result in
-                onOutput(ResultEmitter.forResult(ResultOutput(result: result, deliveredAt: nil)))
+                onOutput(
+                    ResultEmitter.forResult(
+                        ResultOutput(result: result, deliveredAt: nil), policy: outputPolicy))
             }
         )
         self.appFlow = AppFlow(
