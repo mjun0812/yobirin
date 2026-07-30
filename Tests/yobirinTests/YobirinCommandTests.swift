@@ -16,7 +16,7 @@ final class YobirinCommandTests: XCTestCase {
             "--action", "Open", "--action", "Dismiss",
             "--reply", "--reply-placeholder", "返信を入力",
             "--sound", "default",
-            "--image", "/tmp/icon.png",
+            "--image", TestSupport.existingImagePath(),
         ])
 
         guard let notify = parsed as? NotifyCommand else {
@@ -33,7 +33,7 @@ final class YobirinCommandTests: XCTestCase {
         XCTAssertTrue(notify.reply)
         XCTAssertEqual(notify.replyPlaceholder, "返信を入力")
         XCTAssertEqual(notify.sound, "default")
-        XCTAssertEqual(notify.image, "/tmp/icon.png")
+        XCTAssertEqual(notify.image, TestSupport.existingImagePath())
     }
 
     func testListSubcommandResolvesToListCommand() throws {
