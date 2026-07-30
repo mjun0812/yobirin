@@ -99,3 +99,32 @@
 - 8.2/9.2 (2026-07-28): 全10項目pass (`--profile` 初回許可ダイアログ〜表示確認はユーザー参加で実施)。発見・修正したバグ1件: symlink起動の誤判定リグレッション (commit a868bef)
 - 13.2 (2026-07-28): 透過ディスパッチ全3項目pass (素バイナリからの引き継ぎ配信・掃除引き継ぎ・バージョン不一致案内の目視)
 - 16 (2026-07-28): 確認用通知の全7項目pass。20.6は許可済み状態で再検証し、通知に触れずタイムアウト経路で消えることを確認 (初回検証では許可直後に消えたため、クリックとの区別がつかず再実施した)
+
+## cli-arguments-ux (GUI依存部分の手動検証。spec: .kiro/specs/cli-arguments-ux)
+
+前提: `swift build -c release && .build/release/yobirin install` で新バージョンのバンドルへ更新してから実施する。
+旧バンドルが残っている間は、透過ディスパッチが新しいオプション・サブコマンドを知らない旧バイナリへ
+引き継ぐため、notify系の新機能と `doctor` / `sweep` は動作しない (端末ではバージョン不一致の
+note が更新を促す。非端末では note は出ない — Requirement 13.2 の仕様)。
+
+- [ ] `--exit-code` + アクション: `yobirin -t Deploy -m "Release?" -a Approve -a Reject --exit-code --timeout 2m` で
+      Approve を押す → 終了コード 10。Reject なら 11 (Requirement 1.2)
+      期待結果: `echo $?` が押したボタンの `10 + index` と一致する
+- [ ] `--reply --print text`: `yobirin -t Reply -m "type something" --reply --print text --timeout 2m` で
+      「こんにちは "quoted"」を返信 → stdout にその生テキストのみが出る (JSONの引用符・エスケープなし。
+      Requirements 2.1, 2.5)
+      期待結果: 出力が入力文字列と完全一致し、`{` を含まない
+- [ ] 通知許可拒否時の案内: システム設定で Yobirin の通知をオフにして
+      `yobirin -t x -m y --timeout 30` → stderr に "Yobirin" と "System Settings > Notifications" を
+      含む案内、exit 2、stdout なし (Requirements 10.1〜10.5)。確認後は許可を戻す
+      期待結果: バンドル名入りの案内。プロファイル (`-p claude`) では "Yobirin-Claude" になる
+- [ ] `--profile` + `--message -` の併用: `printf 'line1\nline2\n' | yobirin -p claude -t Stdin -m - --timeout 2m` →
+      通知本文が「line1␤line2」(末尾改行なし) になる (Requirement 5.5。stdin が exec を跨いで
+      引き継がれることの実機確認)
+      期待結果: バナー本文に2行が表示される
+- [ ] `doctor` の許可状態: 許可付与済みの状態で `yobirin doctor` → permission が ok。
+      システム設定でオフにして再実行 → permission が failure になり System Settings への
+      導線が併記され、exit 非0 (Requirements 15.4, 15.6, 15.8)。確認後は許可を戻す
+      期待結果: 許可の状態変化が permission 行に反映される
+
+備考:

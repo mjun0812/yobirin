@@ -37,10 +37,8 @@ $ yobirin --title "Deploy" --message "リリースを承認しますか?" --acti
 長いビルドやテストの完了を知らせ、クリックされたらログを開きます。無視されたり閉じられたりしたら、何もせず終わります:
 
 ```bash
-result=$(yobirin --title "ビルド完了" --message "ログを開きますか?" --timeout 300)
-case "$(echo "$result" | jq -r '.result')" in
-  clicked) open build.log ;;
-esac
+yobirin -t "ビルド完了" -m "ログを開きますか?" --timeout 5m --exit-code
+[ $? -eq 0 ] && open build.log   # exit 0 = クリックされた
 ```
 
 ### 承認してから実行する
@@ -48,9 +46,9 @@ esac
 アクションボタンで確認を取り、承認されたときだけ先へ進みます:
 
 ```bash
-answer=$(yobirin --title "Deploy" --message "本番へリリースしますか?" \
-  --action "承認" --action "却下" --timeout 600)
-if [ "$(echo "$answer" | jq -r '.action')" = "承認" ]; then
+yobirin -t "Deploy" -m "本番へリリースしますか?" \
+  -a "承認" -a "却下" --timeout 10m --exit-code
+if [ $? -eq 10 ]; then   # exit 10 = 1つ目のアクション (承認)、11 = 却下
   ./deploy.sh production
 fi
 ```
@@ -60,10 +58,9 @@ fi
 Claude CodeやCodexの通知hookに組み込むと、タスク完了の通知に返信して、そのまま次の指示を送れます。:
 
 ```bash
-reply=$(yobirin --profile claude --title "Claude Code" \
-  --message "タスクが完了しました。続きの指示があれば返信してください" \
-  --reply --timeout 300)
-text=$(echo "$reply" | jq -r 'select(.result == "replied") | .text')
+text=$(yobirin -p claude -t "Claude Code" \
+  -m "タスクが完了しました。続きの指示があれば返信してください" \
+  --reply --print text --timeout 5m)
 [ -n "$text" ] && echo "$text" >> next-instructions.txt
 ```
 
@@ -72,12 +69,10 @@ text=$(echo "$reply" | jq -r 'select(.result == "replied") | .text')
 タイムアウトを「応答がなければ実行」の合図として使います。席にいれば止められて、いなければ予定どおり進みます:
 
 ```bash
-result=$(yobirin --title "メンテナンス" --message "5分後にバックアップを開始します" \
-  --action "今すぐ開始" --action "中止" --timeout 300)
-case "$(echo "$result" | jq -r '.action // .result')" in
-  中止) exit 0 ;;
-  *) ./backup.sh ;;   # timeoutと「今すぐ開始」はどちらも実行へ
-esac
+yobirin -t "メンテナンス" -m "5分後にバックアップを開始します" \
+  -a "今すぐ開始" -a "中止" --timeout 5m --exit-code
+[ $? -eq 11 ] && exit 0   # exit 11 = 2つ目のアクション (中止)
+./backup.sh               # timeout (4) と「今すぐ開始」(10) はどちらも実行へ
 ```
 
 ## 動作要件
@@ -141,18 +136,23 @@ $ .build/release/yobirin install
 ## 使い方
 
 ```
-yobirin --title <文字列> --message <文字列>
+yobirin -t <文字列> -m <文字列>         # --title / --message
+        [-p <名前>]                    # --profile: プロファイルのバンドルで配信する
         [--subtitle <文字列>]
         [--group <id>]                 # 同じgroupの既存通知を置き換える
-        [--timeout <秒>]               # 省略時は応答まで無期限に待つ
-        [--action <ラベル>]...          # 複数指定可。2つ以上はドロップダウン表示になる
+        [--timeout <期間>]             # 300、90s、5m、1h30m。省略時は無期限に待つ
+        [-a <ラベル>]...                # --action: 複数指定可。2つ以上はドロップダウン表示になる
         [--reply]                      # テキスト入力アクションを追加する
         [--reply-placeholder <文字列>]  # 入力欄のplaceholder (--replyと併用)
         [--sound default|<名前>]
-        [--image <パス>]               # 画像を添付する (既知の制限を参照)
+        [--image <パス>]               # png/jpg/jpeg/gifを添付する (既知の制限を参照)
+        [--exit-code]                  # 結果を終了コードに反映する (後述)
+        [--print <フィールド>]          # JSONの代わりに1フィールドだけ出力する
 ```
 
-`--timeout` には正の秒数を指定します。省略すると応答があるまで無期限に待つので、hookや自動化から呼ぶときは必ず指定してください。
+`--timeout` には秒数、または `h`/`m`/`s` 付きの期間 (`90s`、`5m`、`1h30m`) を指定します。省略すると応答があるまで無期限に待つので、hookや自動化から呼ぶときは必ず指定してください。
+
+`--message -` は本文を標準入力から読みます。ログの末尾を流し込むときに便利です: `tail -3 build.log | yobirin -t Build -m -`
 
 ### 出力
 
@@ -170,6 +170,8 @@ yobirin --title <文字列> --message <文字列>
 - `action` / `actionIndex`：押されたアクションボタンのラベルと0始まりのindex (同名ラベルはindexで区別できます)
 - `text`：返信欄に入力されたテキスト
 
+`--print <フィールド>` を付けると、結果JSONの代わりに指定フィールド (`result` / `action` / `actionIndex` / `text`) の値だけを生の文字列で出力します。`$(...)` でそのまま変数に入ります。結果にそのフィールドが無い場合 (却下されたのに `--print text` など) は何も出力せず、正常終了します。
+
 終了コード:
 
 | コード    | 意味                                       | stdout              |
@@ -178,7 +180,18 @@ yobirin --title <文字列> --message <文字列>
 | 2         | 通知の許可が得られていない                 | なし (理由はstderr) |
 | その他非0 | 環境エラー (引数不正、添付の失敗など)      | なし                |
 
-タイムアウトした通知は、通知センターから削除してから終了するので、応答されないまま残ることはありません。強制終了などで通知だけが残った場合も、引数なしで `yobirin` を起動すれば掃除されます。
+`--exit-code` を付けると、終了コードが常に0ではなく結果を反映するようになり、JSONを解析せずに `$?` だけで分岐できます:
+
+| 結果                   | 終了コード       |
+| ---------------------- | ---------------- |
+| clicked または replied | 0                |
+| dismissed              | 3                |
+| timeout                | 4                |
+| action                 | 10 + actionIndex |
+
+許可なし (2) と環境エラー (1) のコードは変わりません。
+
+タイムアウトした通知は、通知センターから削除してから終了するので、応答されないまま残ることはありません。強制終了などで通知だけが残った場合は、`yobirin sweep` で掃除できます (削除した件数を表示します)。
 
 ### 待機中プロセスの一覧
 
@@ -187,11 +200,11 @@ yobirin --title <文字列> --message <文字列>
 ```console
 $ yobirin ps
 PID    PROFILE    TITLE   TIMEOUT  ELAPSED
-4211   (default)  Deploy  300      42s
+4211   (default)  Deploy  5m00s    42s
 4300   claude     Done    -        12m30s
 ```
 
-`--json` を付けると機械可読な出力になります。
+`--json` を付けると機械可読な出力になります (タイムアウトは秒数で出ます)。`--profile <名前>` で特定プロファイルのプロセスだけに絞り込めます。
 
 ## アイコンプロファイル
 
@@ -214,6 +227,39 @@ PROFILE    BUNDLE ID                    VERSION  PATH
 (default)  com.mjun0812.yobirin         1.1.0    /Users/you/Applications/Yobirin.app
 claude     com.mjun0812.yobirin.claude  1.1.0    /Users/you/Applications/Yobirin-Claude.app
 ```
+
+## シェル補完
+
+`yobirin completion <shell>` で `bash` / `zsh` / `fish` 向けの補完スクリプトを出力します:
+
+```bash
+# zsh (fpath上の補完ディレクトリへ。例: ~/.zfunc)
+yobirin completion zsh > ~/.zfunc/_yobirin
+
+# bash
+yobirin completion bash > /usr/local/etc/bash_completion.d/yobirin
+
+# fish
+yobirin completion fish > ~/.config/fish/completions/yobirin.fish
+```
+
+## トラブルシューティング
+
+`yobirin doctor` が、インストール済みバンドルとそのバージョン、実行中バイナリとの一致、PATH上のsymlink、通知許可の状態を1コマンドで点検します。問題を検出した項目には次に取るべき操作が併記され、問題があれば非0で終了します:
+
+```console
+$ yobirin doctor
+ok       bundle      /Users/you/Applications/Yobirin.app (version 1.2.0)
+ok       profiles    claude, codex
+ok       version     1.2.0
+ok       link        /Users/you/.local/bin/yobirin -> ...
+failure  permission  Denied
+                     -> Enable notifications in System Settings > Notifications > Yobirin.
+
+1 problem(s) found
+```
+
+`--json` を付けると機械可読な出力になります。
 
 ## 既知の制限
 
