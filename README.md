@@ -164,9 +164,10 @@ One JSON object is printed to stdout when the result is determined:
 {"result":"replied","text":"typed text"}
 {"result":"dismissed"}
 {"result":"timeout"}
+{"result":"canceled"}
 ```
 
-- `result`: one of `clicked`, `action`, `replied`, `dismissed`, `timeout`
+- `result`: one of `clicked`, `action`, `replied`, `dismissed`, `timeout`, `canceled`
 - `action` / `actionIndex`: label and zero-based index of the pressed action button (the index disambiguates duplicate labels)
 - `text`: the text entered through the reply field
 
@@ -187,11 +188,21 @@ With `--exit-code`, the exit code reflects the result instead of always being 0,
 | clicked or replied | 0                |
 | dismissed          | 3                |
 | timeout            | 4                |
+| canceled           | 5                |
 | action             | 10 + actionIndex |
 
 The permission (2) and environment error (1) codes are unaffected.
 
 A timed-out notification is removed from Notification Center before yobirin exits, so it never lingers unanswered. If a notification is left behind by a force-killed process, run `yobirin sweep` to remove it (it reports how many notifications were removed).
+
+Sending SIGTERM to a waiting yobirin process cancels it: it removes its own notification from Notification Center, then exits with `{"result":"canceled"}` (exit code 5 with `--exit-code`). This lets a hook clean up a stale notification with one line, since the `--group` string is visible in the process's argv:
+
+```bash
+# a hook can dismiss a stale notification by killing its waiting process
+pkill -f "dotfiles-wezterm-${SESSION_ID}"
+```
+
+No PID bookkeeping is needed. SIGINT is unaffected and keeps its default behavior.
 
 ### Listing waiting processes
 

@@ -128,3 +128,16 @@ note が更新を促す。非端末では note は出ない — Requirement 13.2
       期待結果: 許可の状態変化が permission 行に反映される
 
 備考: 全5項目pass (2026-07-30実施。macOS 26 / Darwin 25、release build v1.1.0 を `yobirin install` で既定バンドルへ更新後に検証)。項目4は使い捨てプロファイル testux で実施し、検証後に uninstall 済み。項目3・5の通知許可は検証後にオンへ復元済み。
+
+## notification-lifecycle (GUI依存部分の手動検証。spec: .kiro/specs/notification-lifecycle)
+
+前提: 新バージョンのバンドルへ `yobirin install` で更新してから実施する (旧バンドルへの透過ディスパッチ問題はcli-arguments-uxセクションに記載済みの既知事項)。
+
+- [ ] SIGTERMによるキャンセル: `yobirin -t Cancel -m "test" --group g1 --timeout 5m &` で通知を表示し、
+      表示中に `pkill -f "g1"` を実行する (Requirements 2.1, 2.3)
+      期待結果: 通知センターから通知が消え、stdout に `{"result":"canceled"}` が出力される
+      (`--exit-code` 併用時は終了コード5)
+- [ ] 同一group並行時の削除の非干渉: 同一groupで短い `--timeout` の通知を5分以内に2回配信する
+      (Requirements 1.1, 1.2)
+      期待結果: 1回目のタイムアウト時刻を過ぎても2回目の通知が通知センターに残っている
+      (修正前は1回目のタイムアウト掃除が2回目の通知を誤って削除し、消えていた)
