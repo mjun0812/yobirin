@@ -203,13 +203,17 @@ final class IntegrationFlowTests: XCTestCase {
 
         client.pendingAuthorizationCompletion?(true, nil)
 
+        // 置換走査の非同期化 (design.md Implementation Notes) により、同期部分の
+        // setNotificationCategoriesが一覧取得 → 削除 → add より先に実行される。
         XCTAssertEqual(
             recorder.events,
-            ["removeDeliveredNotifications", "setNotificationCategories", "add"],
-            "認可 → 除去 → 配信 の順で、コンポーネントをまたいで守られること"
+            ["setNotificationCategories", "removeDeliveredNotifications", "add"],
+            "認可 → 配信 (category登録 → 置換走査 → add) の順で、コンポーネントをまたいで守られること"
         )
-        XCTAssertEqual(client.removeDeliveredCalls, [["build"]])
-        XCTAssertEqual(client.addedRequests.first?.identifier, "build")
+        XCTAssertEqual(client.removeDeliveredCalls, [[]], "モックの配信済み一覧が空のため削除対象も空")
+        let identifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+        XCTAssertTrue(identifier.hasPrefix(NotificationIdentity.replacementPrefix(group: "build")))
+        XCTAssertNotEqual(identifier, "build", "identifierはもはやgroupそのものではない (research.md DD-1)")
     }
 
     func testFullChainWithoutGroupNeverRemovesExistingNotifications() throws {

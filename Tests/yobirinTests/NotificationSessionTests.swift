@@ -14,6 +14,10 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     private(set) var addedRequests: [UNNotificationRequest] = []
     private(set) var callOrder: [String] = []
 
+    /// `getDeliveredNotificationIdentifiers` が返す識別名列。group置換走査のテストで注入する
+    /// (task 2.1。既定は空配列で、従来どおりの挙動を保つ)。
+    var deliveredIdentifiersToReturn: [String] = []
+
     func requestAuthorization(completionHandler: @escaping (Bool, Error?) -> Void) {
         completionHandler(true, nil)
     }
@@ -35,7 +39,7 @@ private final class MockNotificationCenterClient: NotificationCenterClient {
     }
 
     func getDeliveredNotificationIdentifiers(completionHandler: @escaping ([String]) -> Void) {
-        completionHandler([])
+        completionHandler(deliveredIdentifiersToReturn)
     }
 
     /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
@@ -151,18 +155,43 @@ final class NotificationSessionTests: XCTestCase {
         XCTAssertEqual(replyAction.textInputPlaceholder, "返信を入力")
     }
 
-    // MARK: - Group replacement ordering (Requirements 2.1, 2.2)
+    // MARK: - Group replacement ordering (Requirements 1.1-1.5, 2.1, 2.2)
 
-    func testDeliverWithGroupRemovesExistingBeforeAddingUsingGroupAsIdentifier() throws {
+    func testDeliverWithGroupUsesNewIdentifierSchemeAndOrdersSetCategoriesThenRemoveThenAdd() throws {
         let client = MockNotificationCenterClient()
         let session = NotificationSession(client: client, actions: [], onResult: { _ in })
         let request = makeRequest(group: "build")
 
         try session.deliver(request)
 
-        XCTAssertEqual(client.removeDeliveredCalls, [["build"]])
-        XCTAssertEqual(client.callOrder, ["removeDeliveredNotifications", "setNotificationCategories", "add"])
-        XCTAssertEqual(client.addedRequests.first?.identifier, "build")
+        // 置換走査の非同期化 (design.md Implementation Notes) により、同期部分の
+        // setNotificationCategoriesが一覧取得 → 削除 → add より先に実行される。
+        XCTAssertEqual(client.callOrder, ["setNotificationCategories", "removeDeliveredNotifications", "add"])
+        let identifier = try XCTUnwrap(client.addedRequests.first?.identifier)
+        XCTAssertTrue(identifier.hasPrefix(NotificationIdentity.replacementPrefix(group: "build")))
+        XCTAssertNotEqual(identifier, "build", "identifierはもはやgroupそのものではない (research.md DD-1)")
+    }
+
+    /// モックが返す識別名列 (自group 2件 + 先頭部分が重なる別group 1件 + groupなし1件) から
+    /// 自groupの2件だけが削除されることを固定する (task 2.1, Requirement 1.1, 1.2, 1.4, 1.5)。
+    func testDeliverWithGroupRemovesOnlyOwnGroupIdentifiersFromDeliveredList() throws {
+        let client = MockNotificationCenterClient()
+        let session = NotificationSession(client: client, actions: [], onResult: { _ in })
+        let ownGroup = "abc"
+        // base64("abc") は base64("abcd") の接頭辞だが、"#" 終端により識別名としては
+        // 一致しない (research.md DD-1)。先頭部分が重なる別groupの代表例として使う。
+        let overlappingGroup = "abcd"
+        let ownPrefix = NotificationIdentity.replacementPrefix(group: ownGroup)
+        let own1 = ownPrefix + UUID().uuidString
+        let own2 = ownPrefix + UUID().uuidString
+        let overlappingIdentifier = NotificationIdentity.makeIdentifier(group: overlappingGroup)
+        let noGroupIdentifier = NotificationIdentity.makeIdentifier(group: nil)
+        client.deliveredIdentifiersToReturn = [own1, own2, overlappingIdentifier, noGroupIdentifier]
+        let request = makeRequest(group: ownGroup)
+
+        try session.deliver(request)
+
+        XCTAssertEqual(client.removeDeliveredCalls, [[own1, own2]])
     }
 
     func testDeliverWithoutGroupDoesNotRemoveExisting() throws {
@@ -375,6 +404,29 @@ final class NotificationSessionTests: XCTestCase {
 
         XCTAssertTrue(client.removeDeliveredCalls.isEmpty)
         XCTAssertEqual(results, [.clicked])
+    }
+
+    /// セッションAのtimeoutが、モック上のセッションBの識別名を削除しないことを固定する
+    /// (task 2.1, 修正対象のバグの回帰テスト。Requirement 1.1, 1.2)。
+    func testHandleTimeoutOfOneSessionDoesNotRemoveAnotherSessionsIdentifierOnSharedClient() throws {
+        let client = MockNotificationCenterClient()
+        let sessionA = NotificationSession(client: client, actions: [], onResult: { _ in })
+        let sessionB = NotificationSession(client: client, actions: [], onResult: { _ in })
+
+        try sessionA.deliver(makeRequest(group: "build"))
+        let identifierA = try XCTUnwrap(client.addedRequests[0].identifier)
+        try sessionB.deliver(makeRequest(group: "build"))
+        let identifierB = try XCTUnwrap(client.addedRequests[1].identifier)
+
+        XCTAssertNotEqual(identifierA, identifierB, "同一groupでも識別名は毎回別採番であること")
+
+        sessionA.handleTimeout()
+
+        XCTAssertEqual(client.removeDeliveredCalls.last, [identifierA])
+        XCTAssertFalse(
+            client.removeDeliveredCalls.flatMap { $0 }.contains(identifierB),
+            "セッションAのtimeoutがセッションBの識別名を削除してはならない"
+        )
     }
 
     func testConcurrentResponsesCommitExactlyOnce() {
