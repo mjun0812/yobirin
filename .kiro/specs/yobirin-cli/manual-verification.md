@@ -107,24 +107,24 @@
 引き継ぐため、notify系の新機能と `doctor` / `sweep` は動作しない (端末ではバージョン不一致の
 note が更新を促す。非端末では note は出ない — Requirement 13.2 の仕様)。
 
-- [ ] `--exit-code` + アクション: `yobirin -t Deploy -m "Release?" -a Approve -a Reject --exit-code --timeout 2m` で
+- [x] `--exit-code` + アクション: `yobirin -t Deploy -m "Release?" -a Approve -a Reject --exit-code --timeout 2m` で
       Approve を押す → 終了コード 10。Reject なら 11 (Requirement 1.2)
       期待結果: `echo $?` が押したボタンの `10 + index` と一致する
-- [ ] `--reply --print text`: `yobirin -t Reply -m "type something" --reply --print text --timeout 2m` で
+- [x] `--reply --print text`: `yobirin -t Reply -m "type something" --reply --print text --timeout 2m` で
       「こんにちは "quoted"」を返信 → stdout にその生テキストのみが出る (JSONの引用符・エスケープなし。
       Requirements 2.1, 2.5)
       期待結果: 出力が入力文字列と完全一致し、`{` を含まない
-- [ ] 通知許可拒否時の案内: システム設定で Yobirin の通知をオフにして
+- [x] 通知許可拒否時の案内: システム設定で Yobirin の通知をオフにして
       `yobirin -t x -m y --timeout 30` → stderr に "Yobirin" と "System Settings > Notifications" を
       含む案内、exit 2、stdout なし (Requirements 10.1〜10.5)。確認後は許可を戻す
       期待結果: バンドル名入りの案内。プロファイル (`-p claude`) では "Yobirin-Claude" になる
-- [ ] `--profile` + `--message -` の併用: `printf 'line1\nline2\n' | yobirin -p claude -t Stdin -m - --timeout 2m` →
+- [x] `--profile` + `--message -` の併用: `printf 'line1\nline2\n' | yobirin -p claude -t Stdin -m - --timeout 2m` →
       通知本文が「line1␤line2」(末尾改行なし) になる (Requirement 5.5。stdin が exec を跨いで
       引き継がれることの実機確認)
       期待結果: バナー本文に2行が表示される
-- [ ] `doctor` の許可状態: 許可付与済みの状態で `yobirin doctor` → permission が ok。
+- [x] `doctor` の許可状態: 許可付与済みの状態で `yobirin doctor` → permission が ok。
       システム設定でオフにして再実行 → permission が failure になり System Settings への
       導線が併記され、exit 非0 (Requirements 15.4, 15.6, 15.8)。確認後は許可を戻す
       期待結果: 許可の状態変化が permission 行に反映される
 
-備考:
+備考: 全5項目pass (2026-07-30実施。macOS 26 / Darwin 25、release build v1.1.0 を `yobirin install` で既定バンドルへ更新後に検証)。項目4は使い捨てプロファイル testux で実施し、検証後に uninstall 済み。項目3・5の通知許可は検証後にオンへ復元済み。
