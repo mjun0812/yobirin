@@ -42,6 +42,9 @@ private final class MockNotificationCenterClient: NotificationCenterClient, @unc
             completionHandler([])
         }
     }
+
+    /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {}
 }
 
 /// `getDeliveredNotifications` の completionHandler を一切呼び出さないモック。
@@ -59,6 +62,9 @@ private final class NeverCompletingNotificationCenterClient: NotificationCenterC
     func getDeliveredNotifications(completionHandler: @escaping @Sendable ([UNNotification]) -> Void) {
         // 意図的にcompletionHandlerを呼ばない (ハングを再現)。
     }
+
+    /// `doctor` 専用の読み取り窓口 (Requirement 15.4)。このモックを使う経路では呼ばれない。
+    func getAuthorizationStatus(completionHandler: @escaping @Sendable (UNAuthorizationStatus) -> Void) {}
 }
 
 /// `cleanUpAndExit` の `exit` は `@Sendable` が要求されるため、背景スレッドから記録する

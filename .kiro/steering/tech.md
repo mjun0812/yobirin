@@ -65,7 +65,9 @@ PATH上のsymlink → ~/Applications/Yobirin.app/Contents/MacOS/yobirin (直接�
 - **`--timeout` 省略時は無期限**。呼び出し側 (hook等) が必ず明示指定する運用。許可ダイアログ表示中はタイムアウトが進まない。
 - **アイコンはインストール時にバンドルへ焼き込む** (icnsはImageIOで生成。各サイズにDPIメタデータ 1x=72/2x=144 が必須 — 欠くとRetinaスロットが無言で落ちる)。複数アイコンが必要な場合はプロファイルごとに別バンドルを用意し、`--profile <name>` で選択する。
 - **CLI・JSON出力はalerter互換にしない**。ゼロから設計する。
-- **コマンドは通知系とインストール系の2群に分類する**。インストール系 (`install` / `list` / ヘルプ) は通知API (UserNotifications / AppKit) の型に一切触れず、素のバイナリで完走する。命名規約 (バンドル名・Bundle ID・パス導出) は単一ソース (`ProfileNaming`) に集約する。
+- **コマンドは通知系とインストール系の2群に分類する**。インストール系 (`install` / `uninstall` / `list` / `ps` / `completion` / ヘルプ) は通知API (UserNotifications / AppKit) の型に一切触れず、素のバイナリで完走する。`doctor` のみ例外で、通知系に属するがバンドル外でも劣化して完走する (詳細はstructure.md)。命名規約 (バンドル名・Bundle ID・パス導出) は単一ソース (`ProfileNaming`) に集約する。
+- **バンドル外でのコマンド種別判定は `parseAsRoot` の解決結果の型で行う** (2026-07-30)。引数の位置走査はオプションの値とサブコマンド名を区別できず、`--title install` のような入力でクラッシュしていた。`parseAsRoot` はパースの一環で `validate()` を実行するため、`validate()` に副作用 (標準入力の消費等) を置いてはならない。
+- **短縮オプションに `allowingJoined: true` を指定しない**。`ProfileDispatch.buildExecArguments` のプロファイル指定の除去 (長短4形態) がこの前提に依存しており、破ると引き継ぎ先での再ディスパッチによりexecが無限ループする。
 
 ## Testing
 
@@ -81,4 +83,4 @@ PATH上のsymlink → ~/Applications/Yobirin.app/Contents/MacOS/yobirin (直接�
 - `NSHomeDirectory()` は子プロセスの `HOME` 環境変数を反映しない。実プロセスでのinstall成功系・衝突系は実環境を汚さずに再現できないため、fake注入のテンポラリ領域テストで担保する
 - xctestホストは `Bundle.main.bundleIdentifier` が非nil。「バンドル外」のシミュレートは判定の注入、または実バイナリのプロセス起動で行う
 
-_updated: 2026-07-28 (CLI内蔵インストーラ・listサブコマンド・symlink再exec正規化を反映)_
+_updated: 2026-07-30 (cli-arguments-ux: parseAsRootベースの起動ゲート・doctorの例外・allowingJoined禁止を反映)_

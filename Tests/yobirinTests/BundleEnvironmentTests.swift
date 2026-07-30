@@ -96,3 +96,30 @@ final class BundleEnvironmentTests: XCTestCase {
         XCTAssertEqual(BundleEnvironment.isOutsideBundle(), Bundle.main.bundleIdentifier == nil)
     }
 }
+
+// MARK: - 実行中バンドルの表示名 (Requirements 10.1, 10.3)
+
+final class BundleDisplayNameTests: XCTestCase {
+    func testDefaultBundleName() throws {
+        XCTAssertEqual(
+            BundleEnvironment.bundleDisplayName(
+                bundleURL: URL(fileURLWithPath: "/Users/u/Applications/Yobirin.app")),
+            "Yobirin")
+    }
+
+    /// プロファイルバンドル内で実行されていれば、そのプロファイルの名前が自動的に得られる
+    /// (Requirement 10.3: --profile 指定時は対象バンドル内で実行されているため)。
+    func testProfileBundleName() throws {
+        XCTAssertEqual(
+            BundleEnvironment.bundleDisplayName(
+                bundleURL: URL(fileURLWithPath: "/Users/u/Applications/Yobirin-Claude.app")),
+            "Yobirin-Claude")
+    }
+
+    /// バンドル外 (.appで終わらないパス) では表示名なし。呼び出し側は従来文言へ退避する。
+    func testNonBundlePathHasNoDisplayName() throws {
+        XCTAssertNil(
+            BundleEnvironment.bundleDisplayName(
+                bundleURL: URL(fileURLWithPath: "/Users/u/workspace/.build/debug")))
+    }
+}

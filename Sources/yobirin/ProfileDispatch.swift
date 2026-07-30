@@ -137,16 +137,25 @@ enum ProfileDispatch {
     /// `arguments` (`CommandLine.arguments` 相当。先頭はargv[0]) から `--profile <value>` /
     /// `--profile=<value>` を除去し、argv[0]を `machOPath` に差し替えた引数列を構築する
     /// (純粋関数。design.md「引数から--profileを除いて透過する」)。
+    /// 除去すべき表記は長短あわせて4形態で網羅できる (`--profile v` / `--profile=v` /
+    /// `-p v` / `-p=v`)。swift-argument-parser の `.short` は既定で結合表記 (`-pclaude`) を
+    /// 受理しないため、それ以外の形は現れない (research.md R-2 実測)。
+    ///
+    /// - Important: 短縮形に `allowingJoined: true` を指定すると、この網羅性が崩れて除去漏れが
+    ///   起き、引き継ぎ先で再ディスパッチが走って exec が無限ループする。
+    /// - Note: 走査はトークンの単純比較で足りる。パーサはオプションの値が `-` で始まることを
+    ///   許さない (`-t -p` は "Missing value" で拒否される。2026-07-30 実測) ため、
+    ///   `-p` / `--profile` に一致するトークンが他のオプションの値である可能性はない。
     static func buildExecArguments(machOPath: String, arguments: [String]) -> [String] {
         var result = [machOPath]
         var rest = arguments.dropFirst()
         while !rest.isEmpty {
             let arg = rest.removeFirst()
-            if arg == "--profile" {
+            if arg == "--profile" || arg == "-p" {
                 if !rest.isEmpty { rest.removeFirst() }  // 値を読み捨てる
                 continue
             }
-            if arg.hasPrefix("--profile=") {
+            if arg.hasPrefix("--profile=") || arg.hasPrefix("-p=") {
                 continue
             }
             result.append(arg)

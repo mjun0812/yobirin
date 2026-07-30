@@ -17,31 +17,45 @@ enum LaunchGuard {
     }
 
     /// 通知を配信せず、`getDeliveredNotifications` で取得した配信済み通知(このバンドルのもの
-    /// しか見えない)を全て削除してから即exit(0)する。
+    /// しか見えない)を全て削除し、削除件数を `completion` へ渡す (Requirements 6.3, 12.3)。
     ///
-    /// 掃除完了後にexitすること(fire-and-forgetでexitすると掃除が走る前にプロセスが死ぬ)を
-    /// 保証するため、`removeDeliveredNotifications` の呼び出しと `exit` は
-    /// `getDeliveredNotifications` の completionHandler 内で順に行う。呼び出し元
-    /// (`YobirinMain.main()`)は本関数がreturnした直後にプロセスをexitさせうるため、
-    /// この非同期completionが完了するまで本関数自体を同期的にブロックする。
+    /// 掃除完了後に後続処理を行うこと(fire-and-forgetでexitすると掃除が走る前にプロセスが死ぬ)を
+    /// 保証するため、`removeDeliveredNotifications` の呼び出しと `completion` は
+    /// `getDeliveredNotifications` の completionHandler 内で順に行う。呼び出し元は本関数が
+    /// returnした直後にプロセスをexitさせうるため、この非同期completionが完了するまで本関数
+    /// 自体を同期的にブロックする。
     ///
-    /// 実プロセスではcompletion内の実 `exit(0)` がプロセスを終了させるため、以降の
+    /// `completion` はバックグラウンド (UNのcompletionHandler) から呼ばれる。呼び出し元
+    /// スレッド上で同期的には呼ばれない。
+    ///
+    /// 実プロセスでは `completion` 内の実 `exit` がプロセスを終了させるため、以降の
     /// `finished.signal()` には到達しない (それで正しい)。`timeout` はUN側の稀なハング
     /// への保険であり、Requirement 6.2の「即終了」を損なわない値 (デフォルト2秒)。
+    static func sweepDeliveredNotifications(
+        client: NotificationCenterClient,
+        timeout: DispatchTimeInterval = .seconds(2),
+        completion: @escaping @Sendable (Int) -> Void
+    ) {
+        let finished = DispatchSemaphore(value: 0)
+        DeliveredNotificationSweep(
+            client: client,
+            completion: { removedCount in
+                completion(removedCount)
+                finished.signal()
+            }
+        ).run()
+        _ = finished.wait(timeout: .now() + timeout)
+    }
+
+    /// 引数なし起動の経路 (Requirements 6.2, 6.3)。掃除して即exit(0)する。
+    /// 削除件数は表示しない — この経路の出力先はLaunchServices経由の実行であり、読み手がいない。
+    /// 件数を見せるのは明示的な `sweep` サブコマンドの役目 (Requirement 12.5)。
     static func cleanUpAndExit(
         client: NotificationCenterClient,
         timeout: DispatchTimeInterval = .seconds(2),
         exit: @escaping @Sendable (Int32) -> Void
     ) {
-        let finished = DispatchSemaphore(value: 0)
-        DeliveredNotificationSweep(
-            client: client,
-            exit: { code in
-                exit(code)
-                finished.signal()
-            }
-        ).run()
-        _ = finished.wait(timeout: .now() + timeout)
+        sweepDeliveredNotifications(client: client, timeout: timeout) { _ in exit(0) }
     }
 }
 
@@ -50,18 +64,18 @@ enum LaunchGuard {
 /// 薄いラッパー。`AppFlow` が同種の問題を `@unchecked Sendable` で解決しているのと同じパターン。
 private final class DeliveredNotificationSweep: @unchecked Sendable {
     private let client: NotificationCenterClient
-    private let exit: (Int32) -> Void
+    private let completion: (Int) -> Void
 
-    init(client: NotificationCenterClient, exit: @escaping (Int32) -> Void) {
+    init(client: NotificationCenterClient, completion: @escaping (Int) -> Void) {
         self.client = client
-        self.exit = exit
+        self.completion = completion
     }
 
     func run() {
         client.getDeliveredNotifications { notifications in
             let identifiers = notifications.map { $0.request.identifier }
             self.client.removeDeliveredNotifications(withIdentifiers: identifiers)
-            self.exit(0)
+            self.completion(identifiers.count)
         }
     }
 }

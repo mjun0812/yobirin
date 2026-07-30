@@ -53,6 +53,19 @@ enum BundleEnvironment {
         ProfileDispatch.defaultExec(target, arguments)
     }
 
+    /// 実行中バンドルの表示名 (design.md F8、Requirements 10.1, 10.3)。
+    ///
+    /// バンドルディレクトリ名から `.app` を除いたもの (`Yobirin` / `Yobirin-Claude`)。
+    /// システム設定 > 通知 の一覧に並ぶ名前と一致するため、未許可時の案内にそのまま使える。
+    /// `--profile` 指定時は対象バンドル内で実行されているので、この経路で自動的にプロファイル
+    /// のバンドル名が得られる。バンドル外 (`.app` で終わらないパス) は `nil` を返し、
+    /// 呼び出し側は名称部分を省いた文言へ退避する。
+    static func bundleDisplayName(bundleURL: URL = Bundle.main.bundleURL) -> String? {
+        let name = bundleURL.lastPathComponent
+        guard name.hasSuffix(".app") else { return nil }
+        return String(name.dropLast(".app".count))
+    }
+
     /// 配置済みバンドルの `Contents/Info.plist` から `CFBundleIdentifier` /
     /// `CFBundleShortVersionString` を読む (design.md ListCommand責務 / 透過ディスパッチの
     /// バージョン比較、Requirements 14.2, 17.4)。`ListCommand` と `BundleVersionCheck`

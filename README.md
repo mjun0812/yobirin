@@ -37,10 +37,8 @@ $ yobirin --title "Deploy" --message "Approve the release?" --action "Approve" -
 Announce that a long build or test run finished, and open the log when clicked. If the notification is ignored or dismissed, nothing happens:
 
 ```bash
-result=$(yobirin --title "Build finished" --message "Open the log?" --timeout 300)
-case "$(echo "$result" | jq -r '.result')" in
-  clicked) open build.log ;;
-esac
+yobirin -t "Build finished" -m "Open the log?" --timeout 5m --exit-code
+[ $? -eq 0 ] && open build.log   # exit 0 = clicked
 ```
 
 ### Ask for approval before running
@@ -48,9 +46,9 @@ esac
 Confirm with action buttons, and proceed only when approved:
 
 ```bash
-answer=$(yobirin --title "Deploy" --message "Release to production?" \
-  --action "Approve" --action "Reject" --timeout 600)
-if [ "$(echo "$answer" | jq -r '.action')" = "Approve" ]; then
+yobirin -t "Deploy" -m "Release to production?" \
+  -a "Approve" -a "Reject" --timeout 10m --exit-code
+if [ $? -eq 10 ]; then   # exit 10 = first action (Approve), 11 = Reject
   ./deploy.sh production
 fi
 ```
@@ -60,10 +58,9 @@ fi
 Wire it into the notification hook of Claude Code or Codex, and you can reply to the completion notification to send the next instruction:
 
 ```bash
-reply=$(yobirin --profile claude --title "Claude Code" \
-  --message "Task finished. Reply with the next instruction if any" \
-  --reply --timeout 300)
-text=$(echo "$reply" | jq -r 'select(.result == "replied") | .text')
+text=$(yobirin -p claude -t "Claude Code" \
+  -m "Task finished. Reply with the next instruction if any" \
+  --reply --print text --timeout 5m)
 [ -n "$text" ] && echo "$text" >> next-instructions.txt
 ```
 
@@ -72,12 +69,10 @@ text=$(echo "$reply" | jq -r 'select(.result == "replied") | .text')
 Use the timeout as "run unless someone objects". If you are at your desk you can stop it; if not, it proceeds as scheduled:
 
 ```bash
-result=$(yobirin --title "Maintenance" --message "Backup starts in 5 minutes" \
-  --action "Start now" --action "Cancel" --timeout 300)
-case "$(echo "$result" | jq -r '.action // .result')" in
-  Cancel) exit 0 ;;
-  *) ./backup.sh ;;   # both timeout and "Start now" proceed
-esac
+yobirin -t "Maintenance" -m "Backup starts in 5 minutes" \
+  -a "Start now" -a "Cancel" --timeout 5m --exit-code
+[ $? -eq 11 ] && exit 0   # exit 11 = second action (Cancel)
+./backup.sh               # timeout (4) and "Start now" (10) both proceed
 ```
 
 ## Requirements
@@ -141,18 +136,23 @@ Running `yobirin install` sends one confirmation notification, and macOS shows a
 ## Usage
 
 ```
-yobirin --title <string> --message <string>
+yobirin -t <string> -m <string>        # --title / --message
+        [-p <name>]                    # --profile: deliver via a profile bundle
         [--subtitle <string>]
         [--group <id>]                 # replace an existing notification with the same group
-        [--timeout <seconds>]          # wait forever when omitted
-        [--action <label>]...          # repeatable; two or more become a dropdown
+        [--timeout <duration>]         # 300, 90s, 5m, 1h30m; wait forever when omitted
+        [-a <label>]...                # --action: repeatable; two or more become a dropdown
         [--reply]                      # add a text input action
         [--reply-placeholder <string>] # placeholder for the reply field (requires --reply)
         [--sound default|<name>]
-        [--image <path>]               # attach an image (see known limitations)
+        [--image <path>]               # attach a png/jpg/jpeg/gif (see known limitations)
+        [--exit-code]                  # map the result to the exit code (see below)
+        [--print <field>]              # print one field instead of the JSON
 ```
 
-`--timeout` accepts a positive number of seconds. When omitted, yobirin waits indefinitely for a response, so always pass it when calling from hooks or automation.
+`--timeout` accepts a bare number of seconds or a duration with `h`/`m`/`s` units (`90s`, `5m`, `1h30m`). When omitted, yobirin waits indefinitely for a response, so always pass it when calling from hooks or automation.
+
+`--message -` reads the body from standard input, which is handy for piping in the tail of a log: `tail -3 build.log | yobirin -t Build -m -`.
 
 ### Output
 
@@ -170,6 +170,8 @@ One JSON object is printed to stdout when the result is determined:
 - `action` / `actionIndex`: label and zero-based index of the pressed action button (the index disambiguates duplicate labels)
 - `text`: the text entered through the reply field
 
+`--print <field>` prints just one field of the result (`result`, `action`, `actionIndex`, or `text`) as a raw string instead of the JSON, so `$(...)` captures it directly. When the field does not apply to the result (for example `--print text` on a dismissed notification), nothing is printed and the command still succeeds.
+
 Exit codes:
 
 | Code           | Meaning                                                        | stdout                  |
@@ -178,7 +180,18 @@ Exit codes:
 | 2              | Notification permission not granted                            | none (reason on stderr) |
 | other non-zero | Environment error (invalid arguments, attachment failure, ...) | none                    |
 
-A timed-out notification is removed from Notification Center before yobirin exits, so it never lingers unanswered. If a notification is left behind by a force-killed process, launching `yobirin` with no arguments sweeps it away.
+With `--exit-code`, the exit code reflects the result instead of always being 0, so a shell can branch on `$?` without parsing JSON:
+
+| Result             | Exit code        |
+| ------------------ | ---------------- |
+| clicked or replied | 0                |
+| dismissed          | 3                |
+| timeout            | 4                |
+| action             | 10 + actionIndex |
+
+The permission (2) and environment error (1) codes are unaffected.
+
+A timed-out notification is removed from Notification Center before yobirin exits, so it never lingers unanswered. If a notification is left behind by a force-killed process, run `yobirin sweep` to remove it (it reports how many notifications were removed).
 
 ### Listing waiting processes
 
@@ -187,11 +200,11 @@ A timed-out notification is removed from Notification Center before yobirin exit
 ```console
 $ yobirin ps
 PID    PROFILE    TITLE   TIMEOUT  ELAPSED
-4211   (default)  Deploy  300      42s
+4211   (default)  Deploy  5m00s    42s
 4300   claude     Done    -        12m30s
 ```
 
-Add `--json` for machine-readable output.
+Add `--json` for machine-readable output (timeouts are reported in seconds there), or `--profile <name>` to list only the processes of one profile.
 
 ## Icon profiles
 
@@ -214,6 +227,39 @@ PROFILE    BUNDLE ID                    VERSION  PATH
 (default)  com.mjun0812.yobirin         1.1.0    /Users/you/Applications/Yobirin.app
 claude     com.mjun0812.yobirin.claude  1.1.0    /Users/you/Applications/Yobirin-Claude.app
 ```
+
+## Shell completion
+
+`yobirin completion <shell>` prints a completion script for `bash`, `zsh`, or `fish`:
+
+```bash
+# zsh (with a completions directory on your fpath, e.g. ~/.zfunc)
+yobirin completion zsh > ~/.zfunc/_yobirin
+
+# bash
+yobirin completion bash > /usr/local/etc/bash_completion.d/yobirin
+
+# fish
+yobirin completion fish > ~/.config/fish/completions/yobirin.fish
+```
+
+## Troubleshooting
+
+`yobirin doctor` checks the installation in one shot: the installed bundle and its version, whether it matches the running binary, the PATH symlink, and the notification permission. Each problem comes with the next step to take, and the command exits non-zero when it finds any:
+
+```console
+$ yobirin doctor
+ok       bundle      /Users/you/Applications/Yobirin.app (version 1.2.0)
+ok       profiles    claude, codex
+ok       version     1.2.0
+ok       link        /Users/you/.local/bin/yobirin -> ...
+failure  permission  Denied
+                     -> Enable notifications in System Settings > Notifications > Yobirin.
+
+1 problem(s) found
+```
+
+Add `--json` for machine-readable output.
 
 ## Known limitations
 

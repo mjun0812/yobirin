@@ -6,8 +6,10 @@
 
 最重要の境界は「通知系」と「インストール系」の2群 (tech.md「CLIとアプリの二面性」):
 
-- **通知系** (バンドル必須): NotifyCommand、AppDelegate / AppFlow、NotificationSession、NotificationCenterClient など。`UserNotifications` / `AppKit` をimportしてよいのはこの群だけ
-- **インストール系** (バンドル不要): InstallCommand、ListCommand、Installer、IcnsWriter、DefaultIcon、ProfileDispatch、BundleEnvironment。通知APIの型に一切触れない — 素のバイナリで完走することの構造的保証なので、レビューではimport文を機械確認する
+- **通知系** (バンドル必須): NotifyCommand、AppDelegate / AppFlow、NotificationSession、NotificationCenterClient、SweepCommand、DoctorCommand。`UserNotifications` / `AppKit` をimportしてよいのはこの群だけ
+- **インストール系** (バンドル不要): InstallCommand、UninstallCommand、ListCommand、PsCommand、CompletionCommand、Installer、IcnsWriter、DefaultIcon、ProfileDispatch、BundleEnvironment。通知APIの型に一切触れない — 素のバイナリで完走することの構造的保証なので、レビューではimport文を機械確認する
+- **共有部品** (Foundation / Darwinのみ): TimeoutDuration (タイムアウト文字列→秒数の単一ソース。notifyとpsが共有)、TerminalDetection (`isatty` の唯一の呼び出し元。利用側は述語を注入で受ける)。どちらの群からも参照できる
+- **例外 — doctor**: 通知許可の状態を報告するため通知系に分類するが、バンドル外でも完走する (通知APIの**呼び出し**はバンドル内であることを実行時に確認し、バンドル外では判定不能として報告する)。許可の読み取りは `getAuthorizationStatus` のみを使い、`requestAuthorization` を診断に使わない (許可ダイアログが出るため)
 
 ## Directory Patterns
 
@@ -47,4 +49,4 @@
 ---
 
 _Document patterns, not file trees. New files following patterns shouldn't require updates_
-_created: 2026-07-28_
+_created: 2026-07-28 / updated: 2026-07-30 (cli-arguments-ux: 新サブコマンドの分類・共有部品・doctorの例外を反映)_

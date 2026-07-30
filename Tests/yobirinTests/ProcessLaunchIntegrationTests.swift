@@ -311,7 +311,10 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         XCTAssertTrue(result.stderr.isEmpty)
     }
 
-    func testOutsideBundleWithMismatchedBundleVersionPrintsUpdateNoticeToStderr() throws {
+    /// バージョン不一致でも、標準エラーがパイプなら案内を出さない (Requirement 13.2)。
+    /// hookから毎回呼ばれる用途でログが埋まるのを避けるため、以前の「常に出す」から変更した。
+    /// 引き継ぎ自体は案内の有無に関わらず成功する (Requirement 13.3)。
+    func testOutsideBundleWithMismatchedBundleVersionSuppressesUpdateNoticeWhenStderrIsNotATerminal() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("yobirin-handoff-version-mismatch-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -322,7 +325,7 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
             arguments: ["--title", "t", "--message", "m"],
             environment: environmentWithFakeInstalledBundle(homeDirectory: tempRoot))
 
-        XCTAssertTrue(result.stderr.contains("run 'yobirin install'"))
+        XCTAssertFalse(result.stderr.contains("run 'yobirin install'"), result.stderr)
         XCTAssertTrue(result.stdout.contains("--title t --message m"))
     }
 
@@ -359,5 +362,112 @@ final class ProcessLaunchIntegrationTests: XCTestCase {
         // アイコン読込 (Installer.install の手順3) はステージング領域 (システムの一時ディレクトリ)
         // で完結し、`homeDirectory` に依存する配置処理 (手順5) より前に例外を投げるため、
         // 実 `~/Applications` には到達しない。
+    }
+}
+
+// MARK: - 群7: 起動経路の実バイナリ回帰 (Requirements 8.5, 8.6, 11.2, 11.4, 12.2)
+
+/// F1 (オプション値のサブコマンド名誤認によるクラッシュ)・F5 (補完が起動ゲートに阻まれる) の
+/// 回帰を実バイナリで固定する。fake注入の単体テスト (`LaunchGateClassifyTests`) が分類の
+/// 正しさを、本テストが「ビルドされたバイナリでその結線が本当に機能すること」を担う。
+final class ProcessLaunchGateRegressionTests: XCTestCase {
+    private static let productsDirectory: URL = {
+        for bundle in Bundle.allBundles where bundle.bundlePath.hasSuffix(".xctest") {
+            return bundle.bundleURL.deletingLastPathComponent()
+        }
+        fatalError("products directory (xctestバンドルの隣) が見つかりません")
+    }()
+
+    private static let yobirinExecutablePath =
+        productsDirectory.appendingPathComponent("yobirin").path
+
+    private struct ProcessResult {
+        let exitCode: Int32
+        let stdout: String
+        let stderr: String
+    }
+
+    /// バンドル未インストール相当の環境 (`YOBIRIN_HOME` を空の一時領域へ向ける) で起動する。
+    /// 標準入出力はファイルへリダイレクトされるため、子プロセスから見て端末非接続になる
+    /// (Requirement 12.2 の検証条件そのもの)。
+    private func runIsolated(_ arguments: [String]) throws -> ProcessResult {
+        let temporaryHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yobirin-gate-regression-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: temporaryHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryHome) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: Self.yobirinExecutablePath)
+        process.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment[ProfileNaming.homeEnvironmentKey] = temporaryHome.path
+        process.environment = environment
+
+        let stdoutURL = temporaryHome.appendingPathComponent("stdout")
+        let stderrURL = temporaryHome.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
+        FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+        process.standardOutput = try FileHandle(forWritingTo: stdoutURL)
+        process.standardError = try FileHandle(forWritingTo: stderrURL)
+        process.standardInput = FileHandle.nullDevice
+
+        try process.run()
+        process.waitUntilExit()
+
+        return ProcessResult(
+            exitCode: process.terminationStatus,
+            stdout: String(data: try Data(contentsOf: stdoutURL), encoding: .utf8) ?? "",
+            stderr: String(data: try Data(contentsOf: stderrURL), encoding: .utf8) ?? "")
+    }
+
+    // MARK: F1 回帰 (Requirements 11.2, 11.4)
+
+    /// 修正前は `--title install` の "install" がサブコマンド名と誤認され、バンドル外で
+    /// 通知APIへ到達して `bundleProxyForCurrentProcess is nil` によりSIGABRTで死んでいた。
+    /// 異常終了 (シグナル) ではなく、インストール案内による正常なエラー終了になること。
+    func testOptionValueMatchingASubcommandNameDoesNotCrashOutsideTheBundle() throws {
+        for value in ["install", "uninstall", "list", "ps", "sweep", "doctor", "completion"] {
+            let result = try runIsolated(["--title", value, "--message", "m"])
+
+            XCTAssertEqual(
+                result.exitCode, ResultEmitter.environmentErrorExitCode,
+                "--title \(value): 異常終了せずインストール案内で終わるべき (stderr: \(result.stderr))")
+            XCTAssertTrue(result.stderr.contains("yobirin install"), result.stderr)
+            XCTAssertTrue(result.stdout.isEmpty, "結果JSONを出してはならない: \(result.stdout)")
+        }
+    }
+
+    func testShortFormOptionValueDoesNotCrashEither() throws {
+        let result = try runIsolated(["-t", "install", "-m", "m"])
+        XCTAssertEqual(result.exitCode, ResultEmitter.environmentErrorExitCode)
+        XCTAssertTrue(result.stderr.contains("yobirin install"), result.stderr)
+    }
+
+    // MARK: 補完 (Requirements 8.5, 8.6)
+
+    /// バンドル未インストールでも、サブコマンド経由・従来オプション経由の双方で補完スクリプトが
+    /// 出力される。修正前は従来オプションが許可リストに無く、未インストール環境では
+    /// インストール案内で終了していた (research.md F5)。
+    func testCompletionSubcommandWorksWithoutAnInstalledBundle() throws {
+        let result = try runIsolated(["completion", "zsh"])
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains("#compdef"), "zsh補完スクリプトが出力されていない")
+        XCTAssertFalse(result.stderr.contains("yobirin install"), result.stderr)
+    }
+
+    func testLegacyCompletionOptionWorksWithoutAnInstalledBundle() throws {
+        let result = try runIsolated(["--generate-completion-script", "zsh"])
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains("#compdef"), "zsh補完スクリプトが出力されていない")
+    }
+
+    // MARK: 引数なし × 端末非接続 (Requirement 12.2)
+
+    /// 標準ストリームがすべてファイル/nullへ向いた引数なし起動は、対話とみなされずヘルプを
+    /// 出さない。バンドル外・未インストールなので、従来どおりインストール案内で終わる。
+    func testArgumentlessNonInteractiveLaunchDoesNotShowHelp() throws {
+        let result = try runIsolated([])
+        XCTAssertFalse(result.stdout.contains("USAGE"), "非対話でヘルプが出ている: \(result.stdout)")
+        XCTAssertTrue(result.stderr.contains("yobirin install"), result.stderr)
     }
 }

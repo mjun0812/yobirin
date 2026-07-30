@@ -125,7 +125,7 @@ final class OutputTests: XCTestCase {
         XCTAssertEqual(emitted.destination, .stderr)
         XCTAssertEqual(emitted.exitCode, 2)
         XCTAssertEqual(emitted.text, "通知許可がありません")
-        XCTAssertFalse(emitted.text.contains("\"result\""))
+        XCTAssertFalse(emitted.text?.contains("\"result\"") ?? false)
     }
 
     func testForEnvironmentErrorProducesStderrAndNonZeroNonTwoExitCodeWithNoJSON() throws {
@@ -135,6 +135,272 @@ final class OutputTests: XCTestCase {
         XCTAssertNotEqual(emitted.exitCode, 0)
         XCTAssertNotEqual(emitted.exitCode, 2)
         XCTAssertEqual(emitted.text, "環境エラーが発生しました")
-        XCTAssertFalse(emitted.text.contains("\"result\""))
+        XCTAssertFalse(emitted.text?.contains("\"result\"") ?? false)
+    }
+}
+
+// MARK: - 出力対象フィールドと値の取り出し (Requirements 2.2, 2.5, 2.7)
+
+final class PrintFieldTests: XCTestCase {
+    func testAcceptsExactlyTheFourDocumentedFields() throws {
+        XCTAssertEqual(
+            Set(PrintField.allCases.map(\.rawValue)),
+            ["result", "action", "actionIndex", "text"])
+    }
+
+    /// 引数解析の段階で4種以外が拒否される (Requirement 2.3 の前提)。
+    func testRejectsUnknownFieldAtArgumentParsing() throws {
+        XCTAssertNil(PrintField(argument: "deliveredAt"))
+        XCTAssertNil(PrintField(argument: "RESULT"))
+        XCTAssertNil(PrintField(argument: ""))
+    }
+
+    func testAcceptsEachDocumentedFieldAsArgument() throws {
+        for field in PrintField.allCases {
+            XCTAssertEqual(PrintField(argument: field.rawValue), field)
+        }
+    }
+}
+
+final class ResultOutputValueTests: XCTestCase {
+    private func value(_ result: NotificationResult, _ field: PrintField) -> String? {
+        ResultOutput(result: result, deliveredAt: nil).value(for: field)
+    }
+
+    // MARK: result はすべての種別で存在する
+
+    func testResultFieldForEveryKind() throws {
+        XCTAssertEqual(value(.clicked, .result), "clicked")
+        XCTAssertEqual(value(.action(label: "Open", index: 0), .result), "action")
+        XCTAssertEqual(value(.replied(text: "hi"), .result), "replied")
+        XCTAssertEqual(value(.dismissed, .result), "dismissed")
+        XCTAssertEqual(value(.timeout, .result), "timeout")
+    }
+
+    // MARK: action / actionIndex は action のみ
+
+    func testActionFieldsOnActionResult() throws {
+        let result = NotificationResult.action(label: "Approve", index: 2)
+        XCTAssertEqual(value(result, .action), "Approve")
+        XCTAssertEqual(value(result, .actionIndex), "2")
+    }
+
+    func testActionFieldsAreAbsentOnOtherKinds() throws {
+        for result in [NotificationResult.clicked, .replied(text: "hi"), .dismissed, .timeout] {
+            XCTAssertNil(value(result, .action), "\(result)")
+            XCTAssertNil(value(result, .actionIndex), "\(result)")
+        }
+    }
+
+    // MARK: text は replied のみ
+
+    func testTextFieldOnRepliedResult() throws {
+        XCTAssertEqual(value(.replied(text: "reply body"), .text), "reply body")
+    }
+
+    func testTextFieldIsAbsentOnOtherKinds() throws {
+        for result in [NotificationResult.clicked, .action(label: "A", index: 0), .dismissed, .timeout] {
+            XCTAssertNil(value(result, .text), "\(result)")
+        }
+    }
+
+    // MARK: 生の文字列 (Requirement 2.5)
+
+    /// JSONのクォート・エスケープを施さない。引用符や改行を含む返信がそのまま出る。
+    func testValuesAreRawStringsWithoutJSONEscaping() throws {
+        XCTAssertEqual(value(.replied(text: "say \"hi\"\nplease"), .text), "say \"hi\"\nplease")
+        XCTAssertEqual(value(.action(label: "は い", index: 0), .action), "は い")
+    }
+}
+
+// MARK: - 出力方針 (Requirements 1, 2, 3)
+
+final class OutputPolicyTests: XCTestCase {
+    func testDefaultPolicyKeepsTheExistingBehavior() throws {
+        XCTAssertEqual(OutputPolicy.default, OutputPolicy(exitCodeEnabled: false, printField: nil))
+    }
+}
+
+// MARK: - 結果種別からの終了コード (Requirements 1.1〜1.4, 1.6, 1.7)
+
+final class ResultExitCodeTests: XCTestCase {
+    func testClickedAndRepliedExitZero() throws {
+        XCTAssertEqual(ResultEmitter.exitCode(for: .clicked), 0)
+        XCTAssertEqual(ResultEmitter.exitCode(for: .replied(text: "hi")), 0)
+    }
+
+    func testActionExitsBasePlusIndex() throws {
+        XCTAssertEqual(ResultEmitter.exitCode(for: .action(label: "A", index: 0)), 10)
+        XCTAssertEqual(ResultEmitter.exitCode(for: .action(label: "B", index: 1)), 11)
+        XCTAssertEqual(ResultEmitter.exitCode(for: .action(label: "C", index: 5)), 15)
+    }
+
+    func testDismissedExitsThree() throws {
+        XCTAssertEqual(ResultEmitter.exitCode(for: .dismissed), 3)
+    }
+
+    func testTimeoutExitsFour() throws {
+        XCTAssertEqual(ResultEmitter.exitCode(for: .timeout), 4)
+    }
+
+    /// 既存の予約コード (未許可2 / 環境エラー1) と衝突しないこと (Requirements 1.6, 1.7)。
+    /// アクションの index は category 登録時に採番される小さな値だが、上限は仕様に無いため
+    /// 広い範囲で確かめる。
+    func testNeverReturnsTheReservedExitCodes() throws {
+        var codes: [Int32] = [
+            ResultEmitter.exitCode(for: .clicked),
+            ResultEmitter.exitCode(for: .replied(text: "t")),
+            ResultEmitter.exitCode(for: .dismissed),
+            ResultEmitter.exitCode(for: .timeout),
+        ]
+        for index in 0..<100 {
+            codes.append(ResultEmitter.exitCode(for: .action(label: "L", index: index)))
+        }
+        XCTAssertFalse(codes.contains(ResultEmitter.permissionDeniedExitCode))
+        XCTAssertFalse(codes.contains(ResultEmitter.environmentErrorExitCode))
+    }
+
+    /// 終了コードの数値は ResultEmitter の定数として一元管理する (structure.md)。
+    func testCodesAreExposedAsNamedConstants() throws {
+        XCTAssertEqual(ResultEmitter.dismissedExitCode, 3)
+        XCTAssertEqual(ResultEmitter.timeoutExitCode, 4)
+        XCTAssertEqual(ResultEmitter.actionExitCodeBase, 10)
+    }
+}
+
+// MARK: - 出力方針に従う出力決定 (Requirements 1.5, 1.8, 2.1, 2.4, 2.6, 3.1)
+
+final class ResultEmitterPolicyTests: XCTestCase {
+    private func emit(
+        _ result: NotificationResult,
+        exitCode: Bool = false,
+        print field: PrintField? = nil
+    ) -> EmittedOutput {
+        ResultEmitter.forResult(
+            ResultOutput(result: result, deliveredAt: nil),
+            policy: OutputPolicy(exitCodeEnabled: exitCode, printField: field))
+    }
+
+    // MARK: 既定方針は変更前と完全に一致する (Requirements 1.5, 2.6)
+
+    func testDefaultPolicyMatchesThePreviousBehaviorForEveryKind() throws {
+        let results: [NotificationResult] = [
+            .clicked, .action(label: "Open", index: 1), .replied(text: "hi"), .dismissed, .timeout,
+        ]
+        for result in results {
+            let output = ResultOutput(result: result, deliveredAt: nil)
+            let emitted = ResultEmitter.forResult(output)
+            XCTAssertEqual(emitted.destination, .stdout, "\(result)")
+            XCTAssertEqual(emitted.text, output.jsonString(), "\(result)")
+            XCTAssertEqual(emitted.exitCode, 0, "\(result)")
+        }
+    }
+
+    /// policy 省略と .default 明示は同じ結果になる (既定引数の回帰固定)。
+    func testOmittedPolicyEqualsExplicitDefault() throws {
+        let output = ResultOutput(result: .dismissed, deliveredAt: nil)
+        XCTAssertEqual(ResultEmitter.forResult(output), ResultEmitter.forResult(output, policy: .default))
+    }
+
+    // MARK: --exit-code のみ (Requirements 1.1〜1.4, 1.8)
+
+    func testExitCodeOnlyChangesTheExitCodeButNotTheOutput() throws {
+        let emitted = emit(.dismissed, exitCode: true)
+        XCTAssertEqual(emitted.text, ResultOutput(result: .dismissed, deliveredAt: nil).jsonString())
+        XCTAssertEqual(emitted.exitCode, 3)
+    }
+
+    func testExitCodeReflectsActionIndex() throws {
+        XCTAssertEqual(emit(.action(label: "B", index: 1), exitCode: true).exitCode, 11)
+    }
+
+    // MARK: --print のみ (Requirements 2.1, 2.4)
+
+    func testPrintReplacesTheJSONWithTheRawValue() throws {
+        let emitted = emit(.replied(text: "the reply"), print: .text)
+        XCTAssertEqual(emitted.text, "the reply")
+        XCTAssertEqual(emitted.exitCode, 0)
+        XCTAssertEqual(emitted.destination, .stdout)
+    }
+
+    /// フィールドが結果種別に存在しないとき、text は nil (出力なし)。空文字列とは区別される
+    /// (Requirement 2.4: 空行も書かない)。終了コードは方針に従い決まる。
+    func testMissingFieldProducesNoOutputAtAll() throws {
+        let emitted = emit(.dismissed, print: .text)
+        XCTAssertNil(emitted.text)
+        XCTAssertEqual(emitted.exitCode, 0)
+    }
+
+    /// 空の返信は「出力なし」ではなく「空の値の出力」。nil と空文字列の区別が保たれる。
+    func testEmptyReplyIsAnEmptyValueNotAnAbsentOne() throws {
+        XCTAssertEqual(emit(.replied(text: ""), print: .text).text, "")
+    }
+
+    // MARK: 併用 (Requirement 3.1)
+
+    func testCombinedPolicyPrintsTheRawValueAndSetsTheExitCode() throws {
+        let emitted = emit(.action(label: "Approve", index: 0), exitCode: true, print: .action)
+        XCTAssertEqual(emitted.text, "Approve")
+        XCTAssertEqual(emitted.exitCode, 10)
+    }
+
+    func testCombinedPolicyWithMissingFieldStillSetsTheExitCode() throws {
+        let emitted = emit(.timeout, exitCode: true, print: .text)
+        XCTAssertNil(emitted.text)
+        XCTAssertEqual(emitted.exitCode, 4)
+    }
+
+    // MARK: 出力方針は許可なし・環境エラーの経路に影響しない (Requirements 1.6, 1.7)
+
+    func testPermissionDeniedAndEnvironmentErrorAreUnaffected() throws {
+        XCTAssertEqual(ResultEmitter.forPermissionDenied(reason: "denied").exitCode, 2)
+        XCTAssertEqual(ResultEmitter.forEnvironmentError("broken").exitCode, 1)
+    }
+}
+
+private struct NoopCancellable: Cancellable {
+    func cancel() {}
+}
+
+// MARK: - text が nil のとき書き込まない (Requirement 2.4)
+
+final class ExitCoordinatorNilTextTests: XCTestCase {
+    func testNilTextWritesNothingButStillExitsWithTheCode() throws {
+        var writes: [(OutputDestination, String)] = []
+        var scheduled: [() -> Void] = []
+        var exitCodes: [Int32] = []
+
+        ExitCoordinator.finish(
+            EmittedOutput(destination: .stdout, text: nil, exitCode: 4),
+            writer: { writes.append(($0, $1)) },
+            scheduler: { _, work in
+                scheduled.append(work)
+                return NoopCancellable()
+            },
+            exit: { exitCodes.append($0) }
+        )
+        for work in scheduled { work() }
+
+        XCTAssertTrue(writes.isEmpty, "nil は出力なしを意味する。空行も書かない")
+        XCTAssertEqual(exitCodes, [4])
+    }
+
+    func testEmptyTextStillWritesAnEmptyLine() throws {
+        var writes: [(OutputDestination, String)] = []
+        var scheduled: [() -> Void] = []
+
+        ExitCoordinator.finish(
+            EmittedOutput(destination: .stdout, text: "", exitCode: 0),
+            writer: { writes.append(($0, $1)) },
+            scheduler: { _, work in
+                scheduled.append(work)
+                return NoopCancellable()
+            },
+            exit: { _ in }
+        )
+        for work in scheduled { work() }
+
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(writes.first?.1, "")
     }
 }

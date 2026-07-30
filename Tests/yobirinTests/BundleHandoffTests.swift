@@ -89,6 +89,9 @@ final class BundleHandoffTests: XCTestCase {
             naming: naming,
             arguments: ["/old/yobirin"],
             currentVersion: "1.0.0",
+            // 案内は標準エラーが端末のときだけ出る (Requirement 13.1)。テスト実行環境の
+            // 端末状態に左右されないよう明示する。
+            isStandardErrorTerminal: true,
             stderrWriter: { events.append("stderr:\($0)") },
             exit: { _ in },
             exec: { _, _ in events.append("exec") }
@@ -121,5 +124,71 @@ final class BundleHandoffTests: XCTestCase {
 
         XCTAssertEqual(exitCodes, [ResultEmitter.environmentErrorExitCode])
         XCTAssertEqual(stderrMessages.count, 1)
+    }
+}
+
+// MARK: - バージョン不一致案内の表示条件 (Requirement 13)
+
+/// hookから毎回呼ばれる用途では、更新案内が毎回stderrへ出るとログを埋める。
+/// 案内は標準エラーが端末に接続されているときだけ出す。
+final class BundleVersionNoticeVisibilityTests: XCTestCase {
+    private func makeFakeBundle(version: String) -> ProfileNaming {
+        let root = NSTemporaryDirectory() + "yobirin-notice-" + UUID().uuidString
+        let bundlePath = "\(root)/Applications/Yobirin.app"
+        try? FileManager.default.createDirectory(
+            atPath: "\(bundlePath)/Contents", withIntermediateDirectories: true)
+        let plist: [String: Any] = ["CFBundleShortVersionString": version]
+        let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try? data?.write(to: URL(fileURLWithPath: "\(bundlePath)/Contents/Info.plist"))
+        return ProfileNaming.default(homeDirectory: root)
+    }
+
+    private func stderrMessages(isStandardErrorTerminal: Bool) -> [String] {
+        let naming = makeFakeBundle(version: "0.9.0")
+        var messages: [String] = []
+        BundleHandoff.execDefaultBundle(
+            naming: naming,
+            arguments: ["/old/yobirin"],
+            currentVersion: "1.0.0",
+            isStandardErrorTerminal: isStandardErrorTerminal,
+            stderrWriter: { messages.append($0) },
+            exit: { _ in },
+            exec: { _, _ in }
+        )
+        return messages
+    }
+
+    func testNoticeIsWrittenWhenStandardErrorIsATerminal() {
+        let messages = stderrMessages(isStandardErrorTerminal: true)
+        XCTAssertTrue(messages.contains { $0.contains("run 'yobirin install'") }, "\(messages)")
+    }
+
+    func testNoticeIsSuppressedWhenStandardErrorIsNotATerminal() {
+        let messages = stderrMessages(isStandardErrorTerminal: false)
+        XCTAssertFalse(messages.contains { $0.contains("run 'yobirin install'") }, "\(messages)")
+    }
+
+    /// 案内を抑えても、exec失敗という本物のエラーは出し続ける (Requirement 13.3)。
+    func testHandoffFailureIsStillReportedWhenTheNoticeIsSuppressed() {
+        let messages = stderrMessages(isStandardErrorTerminal: false)
+        XCTAssertTrue(messages.contains { $0.contains("Failed to hand off") }, "\(messages)")
+    }
+
+    /// 案内の有無は終了コードを変えない (Requirement 13.3)。
+    func testExitCodeIsUnaffectedByNoticeVisibility() {
+        for isTerminal in [true, false] {
+            let naming = makeFakeBundle(version: "0.9.0")
+            var exitCodes: [Int32] = []
+            BundleHandoff.execDefaultBundle(
+                naming: naming,
+                arguments: ["/old/yobirin"],
+                currentVersion: "1.0.0",
+                isStandardErrorTerminal: isTerminal,
+                stderrWriter: { _ in },
+                exit: { exitCodes.append($0) },
+                exec: { _, _ in }
+            )
+            XCTAssertEqual(exitCodes, [ResultEmitter.environmentErrorExitCode], "isTerminal=\(isTerminal)")
+        }
     }
 }

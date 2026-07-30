@@ -266,3 +266,65 @@ final class ProfileDispatchTests: XCTestCase {
             checkedPaths, ["/Users/mjun/Applications/Yobirin-Codex.app/Contents/MacOS/yobirin"])
     }
 }
+
+// MARK: - 短縮形のプロファイル指定の除去 (Requirement 6.6)
+
+/// 除去が不完全だと、引き継ぎ先の `NotifyCommand.run()` が再び `--profile` を見て
+/// ディスパッチし、exec が無限ループする (research.md F2)。
+///
+/// 除去すべき表記は4形態で網羅できる。swift-argument-parser の `.short` は既定で
+/// 結合表記 (`-pclaude`) を受理しないため (research.md R-2 実測)、それ以外の形は現れない。
+final class ProfileDispatchShortFlagStrippingTests: XCTestCase {
+    private func strip(_ arguments: [String]) -> [String] {
+        ProfileDispatch.buildExecArguments(
+            machOPath: "/target/yobirin", arguments: ["/old/yobirin"] + arguments)
+    }
+
+    func testStripsSpaceSeparatedShortProfileFlag() {
+        let result = strip(["-t", "t", "-p", "claude", "-m", "m"])
+        XCTAssertEqual(result, ["/target/yobirin", "-t", "t", "-m", "m"])
+    }
+
+    func testStripsEqualsSeparatedShortProfileFlag() {
+        let result = strip(["-t", "t", "-p=claude", "-m", "m"])
+        XCTAssertEqual(result, ["/target/yobirin", "-t", "t", "-m", "m"])
+    }
+
+    func testStripsShortProfileFlagAtTheEndDroppingTheDanglingValue() {
+        let result = strip(["-t", "t", "-m", "m", "-p"])
+        XCTAssertEqual(result, ["/target/yobirin", "-t", "t", "-m", "m"])
+    }
+
+    /// 4形態すべてで、除去後にプロファイル指定が一切残らないこと。
+    func testNoProfileFlagSurvivesInAnyForm() {
+        let forms = [
+            ["--profile", "claude"],
+            ["--profile=claude"],
+            ["-p", "claude"],
+            ["-p=claude"],
+        ]
+        for form in forms {
+            let result = strip(["-t", "t"] + form + ["-m", "m"])
+            XCTAssertFalse(result.contains { $0 == "-p" || $0.hasPrefix("-p=") }, "\(form): \(result)")
+            XCTAssertFalse(
+                result.contains { $0 == "--profile" || $0.hasPrefix("--profile=") }, "\(form): \(result)")
+            XCTAssertFalse(result.contains("claude"), "\(form): \(result)")
+        }
+    }
+
+    /// タイトルの短縮形 `-t` は除去してはならない (プロファイル指定だけを取り除く)。
+    func testDoesNotStripOtherShortFlags() {
+        let result = strip(["-t", "t", "-m", "m", "-a", "Yes"])
+        XCTAssertEqual(result, ["/target/yobirin", "-t", "t", "-m", "m", "-a", "Yes"])
+    }
+
+    /// 線形走査での除去が健全である前提: オプションの値が `-` で始まるトークンになることは
+    /// ない。swift-argument-parser は `-t -p` を "Missing value for '-t <title>'" として
+    /// 拒否する (2026-07-30 実測)。`buildExecArguments` はパースに成功した引数列に対してのみ
+    /// 呼ばれる (`NotifyCommand.run()` 経由) ため、`-p` / `--profile` に一致するトークンは
+    /// 常にプロファイル指定そのものであり、他のオプションの値ではありえない。
+    func testOptionValuesCannotLookLikeFlags() {
+        XCTAssertThrowsError(try NotifyCommand.parse(["-t", "-p", "-m", "m"]))
+        XCTAssertThrowsError(try NotifyCommand.parse(["--title", "--profile", "--message", "m"]))
+    }
+}
