@@ -49,6 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         appFlow.start(request)
     }
 
+    /// `CancellationSignal` からの転送口 (design.md CancellationSignal、Requirements 2.5〜2.7)。
+    /// `session` がprivateのため、`NotifyCommand.run()` から直接 `session.handleCancel()` を
+    /// 呼べない。この薄い転送のみを担う。
+    func handleCancel() {
+        session.handleCancel()
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
