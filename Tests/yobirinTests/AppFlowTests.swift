@@ -194,3 +194,51 @@ final class AppFlowTests: XCTestCase {
         XCTAssertEqual(emitted.first?.text, "{\"result\":\"timeout\"}")
     }
 }
+
+// MARK: - 通知未許可時の案内 (Requirements 10.1〜10.5)
+
+final class AppFlowPermissionMessageTests: XCTestCase {
+    private func deniedMessage(bundleDisplayName: String?) -> EmittedOutput? {
+        let client = MockNotificationCenterClient()
+        let session = NotificationSession(client: client, actions: [], onResult: { _ in })
+        var emitted: [EmittedOutput] = []
+        let flow = AppFlow(
+            client: client,
+            session: session,
+            scheduler: { _, _ in NoopCancellable() },
+            bundleDisplayName: bundleDisplayName,
+            onOutput: { emitted.append($0) }
+        )
+
+        flow.start(
+            NotificationRequest(
+                title: "t", message: "m", subtitle: nil, group: nil, timeout: nil,
+                actions: [], replyEnabled: false, replyPlaceholder: nil, sound: nil, image: nil))
+        client.pendingAuthorizationCompletion?(false, nil)
+        return emitted.first
+    }
+
+    func testDeniedMessageNamesTheBundleAndSystemSettings() throws {
+        let output = try XCTUnwrap(deniedMessage(bundleDisplayName: "Yobirin-Claude"))
+        let text = try XCTUnwrap(output.text)
+
+        XCTAssertTrue(text.contains("Yobirin-Claude"), text)
+        XCTAssertTrue(text.contains("System Settings"), text)
+        XCTAssertTrue(text.contains("Notifications"), text)
+    }
+
+    /// 終了コードと出力先は既存の予約のまま (Requirements 10.4, 10.5)。
+    func testDeniedKeepsExitCode2AndNoResultJSON() throws {
+        let output = try XCTUnwrap(deniedMessage(bundleDisplayName: "Yobirin"))
+        XCTAssertEqual(output.exitCode, ResultEmitter.permissionDeniedExitCode)
+        XCTAssertEqual(output.destination, .stderr)
+        XCTAssertFalse(output.text?.contains("\"result\"") ?? false)
+    }
+
+    /// 表示名が取れないときは名称部分を省いた従来の文言へ退避する (design.md AppFlow)。
+    func testFallsBackToTheGenericWordingWithoutAName() throws {
+        let output = try XCTUnwrap(deniedMessage(bundleDisplayName: nil))
+        let text = try XCTUnwrap(output.text)
+        XCTAssertTrue(text.contains("not permitted"), text)
+    }
+}

@@ -11,6 +11,7 @@ final class AppFlow: @unchecked Sendable {
     private let client: NotificationCenterClient
     private let session: NotificationSession
     private let scheduler: Scheduler
+    private let bundleDisplayName: String?
     private let onOutput: (EmittedOutput) -> Void
 
     /// タイムアウトタイマーのハンドル。破棄されないよう保持する。
@@ -18,15 +19,20 @@ final class AppFlow: @unchecked Sendable {
     /// 認可完了より前にタイマーが読まれることはないため安全 (Requirement 5.4)。
     private var timeoutCancellable: Cancellable?
 
+    /// - Parameter bundleDisplayName: 未許可時の案内に載せるバンドル名 (Requirements 10.1,
+    ///   10.3)。既定は実行中バンドルから取得する。`nil` (バンドル外。理論上バンドル内では
+    ///   起きない) のときは名称部分を省いた文言へ退避する。
     init(
         client: NotificationCenterClient,
         session: NotificationSession,
         scheduler: @escaping Scheduler,
+        bundleDisplayName: String? = BundleEnvironment.bundleDisplayName(),
         onOutput: @escaping (EmittedOutput) -> Void
     ) {
         self.client = client
         self.session = session
         self.scheduler = scheduler
+        self.bundleDisplayName = bundleDisplayName
         self.onOutput = onOutput
     }
 
@@ -46,7 +52,7 @@ final class AppFlow: @unchecked Sendable {
             return
         }
         guard granted else {
-            onOutput(ResultEmitter.forPermissionDenied(reason: "Notifications are not permitted"))
+            onOutput(ResultEmitter.forPermissionDenied(reason: permissionDeniedReason()))
             return
         }
 
@@ -62,5 +68,16 @@ final class AppFlow: @unchecked Sendable {
                 self?.session.handleTimeout()
             }
         }
+    }
+
+    /// 未許可時の文言 (Requirements 10.1, 10.2)。どのバンドルが拒否されているかと、
+    /// システム設定のどこを開けばよいかを1文に含める。名前はシステム設定 > 通知 の一覧の
+    /// 表記と一致する (`BundleEnvironment.bundleDisplayName`)。
+    private func permissionDeniedReason() -> String {
+        guard let name = bundleDisplayName else {
+            return "Notifications are not permitted"
+        }
+        return "Notifications are not permitted for \"\(name)\". "
+            + "Enable them in System Settings > Notifications > \(name)."
     }
 }
