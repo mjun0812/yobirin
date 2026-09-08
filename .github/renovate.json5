@@ -1,0 +1,38 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    "config:recommended",
+    // pre-commit managerは既定で無効なため、明示的に有効化する。
+    ":enablePreCommit",
+    // 毎月1日の4時前 (Asia/Tokyo) にまとめてチェックする。
+    "schedule:monthly",
+  ],
+
+  timezone: "Asia/Tokyo",
+
+  // PRタイトルは `.github/workflows/label-pr.yml` がConventional Commitsとして解釈し、
+  // そこで付いたラベルを `.github/release.yml` がリリースノートの分類に使う。
+  // commit履歴からの自動判定に任せず、`chore(deps): ...` に固定する。
+  semanticCommits: "enabled",
+  semanticCommitType: "chore",
+  semanticCommitScope: "deps",
+
+  // 公開直後に取り下げられる版を掴まないよう、リリースから3日経った版だけを対象にする。
+  minimumReleaseAge: "3 days",
+
+  packageRules: [
+    {
+      matchManagers: ["github-actions"],
+      groupName: "GitHub Actions",
+    },
+    {
+      // `Package.swift` の `from: "1.3.0"` は上限が無いため、既定のrangeStrategyでは
+      // major更新までPRが出ず、宣言と実際に解決される版が乖離し続ける。
+      // 下限を最新に追随させる。`Package.resolved` はRenovateの管理対象外のため、
+      // マージ後に `swift package update` で別途追随させる。
+      matchManagers: ["swift"],
+      rangeStrategy: "bump",
+    },
+  ],
+}
