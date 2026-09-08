@@ -1,0 +1,46 @@
+# Dependabotによる依存の自動更新。
+#
+# PRタイトルは `.github/workflows/label-pr.yml` がConventional Commitsとして解釈し、
+# そこで付いたラベルを `.github/release.yml` がリリースノートの分類に使う。
+# Dependabotの既定タイトル `Bump X from a to b` は規約に合わずラベルが付かないため、
+# commit-messageでprefixとscopeを明示して `chore(deps): ...` の形にしている。
+#
+# mise.toml のツール (prek, shfmt, shellcheck, node, npm:oxfmt) はDependabotの
+# 対応ecosystemに無いため対象外。更新は `mise outdated` で手動確認する。
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Package.swift のrequirementと Package.resolved の両方を更新する。
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 3
+
+  # `repos:` にURLで書かれたhookのみが対象。`repo: local` のhookは更新されない。
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 3
